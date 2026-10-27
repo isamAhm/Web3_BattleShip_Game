@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import React, { useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { shipSVG } from "@/lib/shipSvg";
 import type { BoardCells, Ship } from "@/types/game";
@@ -164,9 +164,8 @@ export function GameBoard({
 
       {/* Rows */}
       {Array.from({ length: 10 }, (_, r) => (
-        <>
+        <React.Fragment key={`row-${r}`}>
           <span
-            key={`row-label-${r}`}
             className="grid place-items-center font-display font-semibold text-[12px] text-[var(--mist)]"
             style={{ gridRow: r + 2, gridColumn: 1 }}
           >
@@ -188,7 +187,7 @@ export function GameBoard({
               </button>
             );
           })}
-        </>
+        </React.Fragment>
       ))}
 
       {/* Ship overlays */}
