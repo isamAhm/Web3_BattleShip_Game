@@ -1,3 +1,8 @@
+# ── Backend (server-only — not published to GitHub) ──────────────────────────
+apps/
+packages/
+docker-compose.yml
+
 # ── Dependencies ──────────────────────────────────────────────────────────────
 node_modules/
 .pnp

@@ -3,6 +3,7 @@ import { Bricolage_Grotesque, Figtree } from "next/font/google";
 import "./globals.css";
 import { Header } from "@/components/layout/Header";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
+import { AuthProvider } from "@/lib/AuthContext";
 
 const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
@@ -38,10 +39,12 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${bricolage.variable} ${figtree.variable}`}>
       <body>
-        <ThemeProvider>
-          <Header />
-          {children}
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <Header />
+            {children}
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );

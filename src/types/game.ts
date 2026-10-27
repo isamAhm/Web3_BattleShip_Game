@@ -77,3 +77,14 @@ export interface MatchStep {
 }
 
 export type BoardCells = Record<string, CellState>;
+
+/** Re-export Board shape for socket payloads */
+export interface Board {
+  ships: Ship[];
+  mines: Cell[];
+}
+
+export interface Cell {
+  row: number;
+  col: number;
+}
