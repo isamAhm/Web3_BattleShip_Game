@@ -2,8 +2,6 @@ import express from "express";
 import { createServer } from "http";
 import { Server as IoServer } from "socket.io";
 import session from "express-session";
-import { createClient } from "redis";
-import { createAdapter } from "@socket.io/redis-adapter";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 

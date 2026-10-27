@@ -9,12 +9,15 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "baseUrl": ".",
     "paths": {
-      "@battle-arena/engine": ["../../packages/engine/src/index.ts"]
+      "@battle-arena/engine": ["../../packages/engine/src/index.ts"],
+      "@battle-arena/engine/*": ["../../packages/engine/src/*"]
     }
   },
   "include": ["src"],
   "ts-node": {
-    "paths": true
+    "transpileOnly": true,
+    "files": true
   }
 }

@@ -1,5 +1,5 @@
 import { MatchState, buildRecord } from "@battle-arena/engine";
-import { sha3_256 } from "js-sha3";
+import { createHash } from "crypto";
 import { Match, ChainLog } from "../db/mongo";
 import { lbIncr, lbAdd } from "../db/redis";
 import { config } from "../config";
@@ -7,7 +7,7 @@ import { config } from "../config";
 /** Compute the canonical result hash */
 export function resultHash(state: MatchState): string {
   const record = buildRecord(state);
-  return "0x" + sha3_256(JSON.stringify(record));
+  return "0x" + createHash("sha3-256").update(JSON.stringify(record)).digest("hex");
 }
 
 /**

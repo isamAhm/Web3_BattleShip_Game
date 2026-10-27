@@ -1,5 +1,5 @@
+import { createHash } from "crypto";
 import { Board } from "./types";
-import { sha3_256 } from "js-sha3";
 
 /**
  * Produce a deterministic canonical string from a board.
@@ -18,11 +18,12 @@ export function canonicalBoard(board: Board): string {
 }
 
 /**
- * Compute commitment hash: keccak256(canonicalBoard + salt)
+ * Compute commitment hash: sha3-256(canonicalBoard + salt)
+ * Uses Node's built-in crypto — no external deps.
  */
 export function commitPlacement(board: Board, salt: string): string {
   const payload = canonicalBoard(board) + "|" + salt;
-  return "0x" + sha3_256(payload);
+  return "0x" + createHash("sha3-256").update(payload).digest("hex");
 }
 
 /**

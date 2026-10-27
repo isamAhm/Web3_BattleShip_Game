@@ -17,7 +17,7 @@ matchesRouter.get("/:matchId/verify", async (req: Request, res: Response) => {
   if (!match) { res.status(404).json({ error: "Match not found" }); return; }
 
   // Recompute hash from stored record
-  const { sha3_256 } = await import("js-sha3");
+  const { createHash } = await import("crypto");
   const record = {
     matchId: match.matchId,
     game: "battleship",
@@ -34,7 +34,7 @@ matchesRouter.get("/:matchId/verify", async (req: Request, res: Response) => {
     winner: match.winner,
     forfeit: match.forfeitedBy ?? null,
   };
-  const computed = "0x" + sha3_256(JSON.stringify(record));
+  const computed = "0x" + createHash("sha3-256").update(JSON.stringify(record)).digest("hex");
   const verified = computed === match.resultHash;
 
   // Chain record (simulated)

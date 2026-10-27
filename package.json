@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev":         "next dev",
-    "build":       "next build",
-    "start":       "next start",
-    "lint":        "eslint",
-    "dev:server":  "npm run dev    --prefix apps/server",
-    "build:server":"npm run build  --prefix apps/server",
-    "build:engine":"npm run build  --prefix packages/engine"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "dev:server": "npm run dev    --prefix apps/server",
+    "build:server": "npm run build  --prefix apps/server",
+    "build:engine": "npm run build  --prefix packages/engine"
   },
   "dependencies": {
     "next": "16.4.3",

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
-import { SiweMessage } from "siwe";
 import { randomBytes } from "crypto";
+import { createPublicClient, http, verifyMessage } from "viem";
+import { baseSepolia } from "viem/chains";
 import { storeNonce, consumeNonce } from "../db/redis";
 import { Player } from "../db/mongo";
 import { config } from "../config";
@@ -8,7 +9,6 @@ import { config } from "../config";
 export const authRouter = Router();
 
 // ─── GET /auth/nonce ──────────────────────────────────────────────────────────
-// Returns a fresh one-time nonce. Stored in Redis with 5-minute TTL.
 authRouter.get("/nonce", async (_req: Request, res: Response) => {
   const nonce = randomBytes(16).toString("hex");
   await storeNonce(nonce);
@@ -16,54 +16,68 @@ authRouter.get("/nonce", async (_req: Request, res: Response) => {
 });
 
 // ─── POST /auth/verify ────────────────────────────────────────────────────────
-// Verifies an EIP-4361 signed message.
+// Body: { message: string, signature: `0x${string}`, address: `0x${string}` }
 authRouter.post("/verify", async (req: Request, res: Response) => {
   try {
-    const { message, signature } = req.body as {
+    const { message, signature, address } = req.body as {
       message: string;
       signature: string;
+      address: string;
     };
 
-    if (!message || !signature) {
-      res.status(400).json({ error: "message and signature required" });
+    if (!message || !signature || !address) {
+      res.status(400).json({ error: "message, signature and address required" });
       return;
     }
 
-    // Parse and verify
-    const siwe = new SiweMessage(message);
+    // Parse nonce from the EIP-4361 message
+    const nonceMatch = message.match(/Nonce:\s*([a-f0-9]+)/i);
+    if (!nonceMatch) {
+      res.status(400).json({ error: "Nonce not found in message" });
+      return;
+    }
+    const nonce = nonceMatch[1];
 
-    // Domain check
-    if (siwe.domain !== config.siweDomain) {
+    // Parse domain
+    const domainMatch = message.match(/^(.+?) wants you to sign in/m);
+    const domain = domainMatch?.[1];
+    if (domain && domain !== config.siweDomain) {
       res.status(401).json({ error: "Domain mismatch" });
       return;
     }
 
-    const result = await siwe.verify({ signature });
-    if (!result.success) {
+    // Verify signature using viem
+    const valid = await verifyMessage({
+      address: address as `0x${string}`,
+      message,
+      signature: signature as `0x${string}`,
+    });
+
+    if (!valid) {
       res.status(401).json({ error: "Invalid signature" });
       return;
     }
 
-    // Consume nonce — rejects replays
-    const valid = await consumeNonce(siwe.nonce);
-    if (!valid) {
+    // Consume nonce (one-time use, prevents replays)
+    const consumed = await consumeNonce(nonce);
+    if (!consumed) {
       res.status(401).json({ error: "Nonce already used or expired" });
       return;
     }
 
-    const address = siwe.address.toLowerCase();
+    const normalizedAddress = address.toLowerCase();
 
-    // Upsert player record
+    // Upsert player
     await Player.findOneAndUpdate(
-      { address },
-      { $setOnInsert: { address } },
+      { address: normalizedAddress },
+      { $setOnInsert: { address: normalizedAddress } },
       { upsert: true, new: true }
     );
 
     // Set session
-    (req.session as any).address = address;
+    (req.session as any).address = normalizedAddress;
 
-    res.json({ address });
+    res.json({ address: normalizedAddress });
   } catch (err: any) {
     console.error("SIWE verify error:", err);
     res.status(401).json({ error: err.message ?? "Verification failed" });
@@ -83,7 +97,5 @@ authRouter.get("/me", async (req: Request, res: Response) => {
 
 // ─── POST /auth/logout ────────────────────────────────────────────────────────
 authRouter.post("/logout", (req: Request, res: Response) => {
-  req.session.destroy(() => {
-    res.json({ ok: true });
-  });
+  req.session.destroy(() => res.json({ ok: true }));
 });
