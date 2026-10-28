@@ -70,6 +70,10 @@ export function JoinRoomPage() {
         setStep("enter");
         return;
       }
+      if (res.matchId) {
+        console.log(`[JoinRoomPage] Successfully joined room, routing to match ${res.matchId}`);
+        router.push(`/arena?match=${res.matchId}`);
+      }
     } catch (err: any) {
       setError(err.message || "Connection error");
       setStep("enter");

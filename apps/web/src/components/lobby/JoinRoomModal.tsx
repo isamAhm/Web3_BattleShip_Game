@@ -72,7 +72,10 @@ export function JoinRoomModal({ onClose }: { onClose: () => void }) {
         setJoining(false);
         return;
       }
-      // On success, backend will emit match:found which triggers onMatchFound
+      if (res.matchId) {
+        console.log(`[JoinRoomModal] Successfully joined room, routing to match ${res.matchId}`);
+        router.push(`/arena?match=${res.matchId}`);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to join room");
       setJoining(false);

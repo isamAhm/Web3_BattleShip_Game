@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
-import { connectSocket, getSocket } from "./socket";
+import { connectSocket, getSocket, waitForSocketConnection } from "./socket";
 import type { Board } from "@/types/game";
 
 export interface ShotResult {
@@ -151,22 +151,76 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
   }, []);
 
   const createRoom = useCallback((customCode?: string) => {
-    return new Promise<{ ok: boolean; roomCode?: string; error?: string }>((resolve) => {
-      const s = connectSocket();
-      s.emit("room:create", { customCode }, (ack: any) => {
-        if (ack) resolve(ack);
-        else resolve({ ok: true, roomCode: customCode });
-      });
+    return new Promise<{ ok: boolean; roomCode?: string; error?: string }>(async (resolve) => {
+      try {
+        const s = connectSocket();
+        const connected = await waitForSocketConnection(s, 3500);
+        if (!connected) {
+          resolve({
+            ok: false,
+            error: "Cannot connect to battle server (localhost:4000). Please check if server is running.",
+          });
+          return;
+        }
+
+        let resolved = false;
+        const timer = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            resolve({
+              ok: false,
+              error: "Room creation timed out waiting for server response.",
+            });
+          }
+        }, 4000);
+
+        s.emit("room:create", { customCode }, (ack: any) => {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timer);
+          if (ack) resolve(ack);
+          else resolve({ ok: true, roomCode: customCode });
+        });
+      } catch (err: any) {
+        resolve({ ok: false, error: err?.message || "Failed to create room" });
+      }
     });
   }, []);
 
   const joinRoom = useCallback((roomCode: string) => {
-    return new Promise<{ ok: boolean; matchId?: string; error?: string }>((resolve) => {
-      const s = connectSocket();
-      s.emit("room:join", { roomCode }, (ack: any) => {
-        if (ack) resolve(ack);
-        else resolve({ ok: true });
-      });
+    return new Promise<{ ok: boolean; matchId?: string; error?: string }>(async (resolve) => {
+      try {
+        const s = connectSocket();
+        const connected = await waitForSocketConnection(s, 3500);
+        if (!connected) {
+          resolve({
+            ok: false,
+            error: "Cannot connect to battle server (localhost:4000). Please check if server is running.",
+          });
+          return;
+        }
+
+        let resolved = false;
+        const timer = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            resolve({
+              ok: false,
+              error: "Room join timed out waiting for server response.",
+            });
+          }
+        }, 4000);
+
+        s.emit("room:join", { roomCode }, (ack: any) => {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timer);
+          if (ack) resolve(ack);
+          else resolve({ ok: true });
+        });
+      } catch (err: any) {
+        resolve({ ok: false, error: err?.message || "Failed to join room" });
+      }
     });
   }, []);
 

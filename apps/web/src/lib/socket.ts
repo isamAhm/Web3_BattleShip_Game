@@ -14,6 +14,10 @@ export function getSocket(token?: string): Socket {
       withCredentials: true,
       auth: currentToken ? { token: currentToken } : undefined,
       autoConnect: false,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      timeout: 5000,
     });
 
     _socket.on("connect", () => {
@@ -27,7 +31,7 @@ export function getSocket(token?: string): Socket {
     _socket.on("disconnect", (reason) => {
       console.log("[Socket] Disconnected:", reason);
     });
-  } else if (currentToken) {
+  } else if (currentToken && (!_socket.auth || (_socket.auth as any).token !== currentToken)) {
     _socket.auth = { token: currentToken };
   }
 
@@ -39,6 +43,11 @@ export function connectSocket(token?: string): Socket {
     token ??
     (typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null);
 
+  if (_socket && currentToken && (!_socket.auth || (_socket.auth as any).token !== currentToken)) {
+    _socket.disconnect();
+    _socket = null;
+  }
+
   const socket = getSocket(currentToken || undefined);
   if (currentToken) {
     socket.auth = { token: currentToken };
@@ -49,8 +58,42 @@ export function connectSocket(token?: string): Socket {
   return socket;
 }
 
+export function waitForSocketConnection(socket: Socket, timeoutMs = 3500): Promise<boolean> {
+  if (socket.connected) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    let timer: any;
+
+    const onConnect = () => {
+      clearTimeout(timer);
+      socket.off("connect", onConnect);
+      socket.off("connect_error", onError);
+      resolve(true);
+    };
+
+    const onError = () => {
+      clearTimeout(timer);
+      socket.off("connect", onConnect);
+      socket.off("connect_error", onError);
+      resolve(false);
+    };
+
+    timer = setTimeout(() => {
+      socket.off("connect", onConnect);
+      socket.off("connect_error", onError);
+      resolve(socket.connected);
+    }, timeoutMs);
+
+    socket.once("connect", onConnect);
+    socket.once("connect_error", onError);
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+  });
+}
+
 export function disconnectSocket(): void {
   _socket?.disconnect();
   _socket = null;
 }
-
