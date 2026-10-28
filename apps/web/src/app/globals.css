@@ -1,0 +1,224 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ── Ocean theme (default) ─────────────────────────── */
+  :root,
+  [data-theme="ocean"] {
+    --abyss: #06141a;
+    --deck: #0c222b;
+    --hull: #13303b;
+    --line: rgba(160, 225, 215, 0.12);
+    --foam: #e9f5f2;
+    --mist: #8fb0ad;
+    --signal: #35d6c0;
+    --flare: #ff6a4d;
+    --brass: #ebb54a;
+    --accent-primary: #35d6c0;
+    --accent-cta: #35d6c0;
+    --cta-text: #06141a;
+    --cta-shadow: rgba(53, 214, 192, 0.55);
+    --hero-glow: rgba(15, 58, 68, 0.6);
+  }
+
+  /* ── Abyss theme (purple/indigo) ───────────────────── */
+  [data-theme="abyss"] {
+    --abyss: #07050f;
+    --deck: #100d1f;
+    --hull: #1a1535;
+    --line: rgba(150, 130, 255, 0.12);
+    --foam: #ede9ff;
+    --mist: #9490b8;
+    --signal: #8b7ff0;
+    --flare: #ff6a4d;
+    --brass: #c9a84c;
+    --accent-primary: #6350dc;
+    --accent-cta: #6350dc;
+    --cta-text: #ffffff;
+    --cta-shadow: rgba(99, 80, 220, 0.6);
+    --hero-glow: rgba(99, 80, 220, 0.2);
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    font-family: var(--font-body, "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif);
+    color: var(--foam);
+    background:
+      radial-gradient(1200px 600px at 70% -10%, #0f3a44 0%, transparent 60%),
+      radial-gradient(900px 500px at -10% 40%, #0a2a33 0%, transparent 55%),
+      var(--abyss);
+    min-height: 100vh;
+    font-variant-numeric: tabular-nums;
+    transition: background 0.4s ease, color 0.3s ease;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
+  }
+}
+
+/* ── Font utilities ─────────────────────────────────── */
+.font-display {
+  font-family: var(--font-display, "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif);
+}
+
+.font-body {
+  font-family: var(--font-body, "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif);
+}
+
+/* ── CTA button — theme-aware ───────────────────────── */
+.btn-cta {
+  background: var(--accent-cta);
+  color: var(--cta-text);
+}
+.btn-cta:hover {
+  box-shadow: 0 10px 32px -6px var(--cta-shadow);
+  transform: translateY(-1px);
+}
+
+/* ── Radar sweep ────────────────────────────────────── */
+@keyframes sweep {
+  to { rotate: 360deg; }
+}
+
+.radar-sweep {
+  position: relative;
+  overflow: hidden;
+}
+
+.radar-sweep::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 200%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(53, 214, 192, 0.22),
+    rgba(53, 214, 192, 0) 18%,
+    transparent 100%
+  );
+  animation: sweep 6s linear infinite;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  z-index: 0;
+}
+
+[data-theme="abyss"] .radar-sweep::after {
+  background: conic-gradient(
+    from 0deg,
+    rgba(139, 127, 240, 0.22),
+    rgba(139, 127, 240, 0) 18%,
+    transparent 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radar-sweep::after { animation: none; opacity: 0.5; }
+}
+
+/* ── Custom scrollbar ───────────────────────────────── */
+.custom-scroll::-webkit-scrollbar        { width: 4px; }
+.custom-scroll::-webkit-scrollbar-track  { background: transparent; }
+.custom-scroll::-webkit-scrollbar-thumb  { background: var(--hull); border-radius: 4px; }
+
+/* ── Ship SVG styles ────────────────────────────────── */
+.vessel svg .h { fill: #52808f; stroke: #1b3f4a; stroke-width: 0.35; }
+.vessel svg .d { fill: #93b9c3; }
+.vessel svg .k { fill: #2a5361; }
+.vessel svg .w { fill: #e1eff0; }
+
+.vessel.wreck svg .h { fill: #4d2a30; stroke: #25100f; }
+.vessel.wreck svg .d { fill: #7d4a4d; }
+.vessel.wreck svg .k { fill: #341a1e; }
+.vessel.wreck svg .w { fill: #b07b76; }
+
+/* ── Responsive arena grid ──────────────────────────── */
+@media (max-width: 1180px) {
+  .arena-grid  { grid-template-columns: 1fr 1fr !important; }
+  .arena-center { grid-column: 1 / -1; order: -1; }
+  .lower-grid  { grid-template-columns: 1fr !important; }
+}
+@media (max-width: 720px) {
+  .arena-grid  { grid-template-columns: 1fr !important; }
+}
+
+/* ── Landing animations ─────────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(-1deg); }
+  50%       { transform: translateY(-18px) rotate(1deg); }
+}
+@keyframes wave {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-float      { animation: float 6s ease-in-out infinite; }
+.animate-wave       { animation: wave 16s linear infinite; }
+.animate-pulse-glow { animation: pulse-glow 3s ease-in-out infinite; }
+.animate-fade-up    { animation: fade-up 0.7s ease both; }
+.animate-fade-up-2  { animation: fade-up 0.7s 0.15s ease both; }
+.animate-fade-up-3  { animation: fade-up 0.7s 0.3s ease both; }
+.animate-fade-up-4  { animation: fade-up 0.7s 0.45s ease both; }
+
+/* ── Theme transition ───────────────────────────────── */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: 0.25s;
+  transition-timing-function: ease;
+}
+/* Don't animate transforms/layout */
+button, a, input { transition-property: background-color, border-color, color, box-shadow, transform, opacity; }
+
+/* ── Shared input style ─────────────────────────────── */
+.input-base {
+  width: 100%;
+  background: var(--abyss);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  color: var(--foam);
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input-base:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 15%, transparent);
+}
+.input-base::placeholder {
+  color: var(--mist);
+  opacity: 0.6;
+}
