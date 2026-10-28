@@ -17,7 +17,7 @@ export type LobbyView = "play" | "create" | "join";
 
 export function LobbyClient() {
   const router = useRouter();
-  const { address } = useAuthCtx();
+  const { address, login } = useAuthCtx();
   const [view, setView] = useState<LobbyView>("play");
   const [joinOpen, setJoinOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -25,21 +25,31 @@ export function LobbyClient() {
   const [queueMsg, setQueueMsg] = useState("");
 
   const { joinQueue, leaveQueue } = useGameSocket({
-    onMatchFound: (matchId) => {
+    onMatchFound: (matchId, opponent) => {
       setInQueue(false);
-      router.push(`/arena?match=${matchId}`);
+      setQueueMsg(`⚔️ Opponent found (${opponent.slice(0, 8)}…)! Launching Arena…`);
+      setTimeout(() => {
+        router.push(`/arena?match=${matchId}`);
+      }, 500);
     },
-    onError: (msg) => setQueueMsg(`Error: ${msg}`),
+    onError: (msg) => {
+      setQueueMsg(`Error: ${msg}`);
+      setInQueue(false);
+    },
   });
 
-  const handleQuickMatch = () => {
-    if (!address) {
-      setQueueMsg("Connect your wallet first");
-      return;
+  const handleQuickMatch = async () => {
+    try {
+      if (!address) {
+        setQueueMsg("Connecting tactical identity…");
+        await login(false);
+      }
+      joinQueue();
+      setInQueue(true);
+      setQueueMsg("Searching for an opponent… (Battle Net Active)");
+    } catch (err: any) {
+      setQueueMsg(`Authentication error: ${err.message}`);
     }
-    joinQueue();
-    setInQueue(true);
-    setQueueMsg("Searching for an opponent…");
   };
 
   const handleCancelQueue = () => {
@@ -56,23 +66,23 @@ export function LobbyClient() {
         {/* Queue status banner */}
         {queueMsg && (
           <div
-            className="mb-5 px-5 py-3 rounded-[14px] border flex items-center gap-3"
+            className="mb-5 px-5 py-3.5 rounded-[14px] border flex items-center gap-3 transition-all animate-fadeIn"
             style={{
-              background: "rgba(235,181,74,0.08)",
-              borderColor: "rgba(235,181,74,0.3)",
+              background: "rgba(53,214,192,0.08)",
+              borderColor: "rgba(53,214,192,0.3)",
             }}
           >
             {inQueue && (
-              <span className="w-2.5 h-2.5 rounded-full animate-pulse flex-none" style={{ background: "var(--brass)" }} />
+              <span className="w-3 h-3 rounded-full animate-ping flex-none bg-[var(--signal)]" />
             )}
-            <span className="text-[14px] font-medium">{queueMsg}</span>
+            <span className="text-[14px] font-mono font-medium text-[var(--signal)]">{queueMsg}</span>
             {inQueue && (
               <button
                 type="button"
                 onClick={handleCancelQueue}
-                className="ml-auto text-[13px] font-semibold text-[var(--mist)] hover:text-[var(--flare)] transition-colors"
+                className="ml-auto text-[13px] font-semibold text-[var(--mist)] hover:text-red-400 transition-colors"
               >
-                Cancel
+                Cancel Queue
               </button>
             )}
           </div>
@@ -85,7 +95,7 @@ export function LobbyClient() {
                 Choose Your Match
               </h1>
               <p className="text-[var(--mist)] mt-1 text-[14px]">
-                {address ? "Jump into a game or create your own room." : "Connect your wallet to start playing."}
+                {address ? `Commander ${address.slice(0, 6)}…${address.slice(-4)} active. Jump into a game or create a room.` : "Connect your wallet or start playing as guest."}
               </p>
             </div>
             <MatchTypeCards

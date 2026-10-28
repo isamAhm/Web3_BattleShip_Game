@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const MODES = [
@@ -25,7 +26,7 @@ const MODES = [
   {
     id: "tournament",
     label: "Tournament",
-    description: "Compete for bigger rewards",
+    description: "Compete for on-chain rewards",
     icon: (
       <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
         <path d="M9 4h10v8a5 5 0 0 1-10 0V4z" fill="rgba(235,181,74,0.12)" stroke="var(--brass)" strokeWidth="1.6" />
@@ -35,14 +36,14 @@ const MODES = [
       </svg>
     ),
     color: "var(--brass)",
-    tag: "Seasonal",
+    tag: "10K Pool",
     tagColor: "rgba(235,181,74,0.12)",
     tagText: "var(--brass)",
   },
   {
     id: "private",
-    label: "Private",
-    description: "Play with friends only",
+    label: "Private Room",
+    description: "Direct PvP code challenge",
     icon: (
       <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
         <rect x="6" y="13" width="16" height="12" rx="3" fill="rgba(143,176,173,0.08)" stroke="var(--mist)" strokeWidth="1.6" />
@@ -52,14 +53,14 @@ const MODES = [
       </svg>
     ),
     color: "var(--mist)",
-    tag: "Invite only",
+    tag: "Custom Code",
     tagColor: "rgba(143,176,173,0.1)",
     tagText: "var(--mist)",
   },
   {
     id: "blitz",
-    label: "Blitz",
-    description: "60-second turns, fast-paced",
+    label: "Blitz Combat",
+    description: "30-second rapid fire turns",
     icon: (
       <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
         <circle cx="14" cy="14" r="9" stroke="var(--flare)" strokeWidth="1.6" fill="rgba(255,106,77,0.08)" />
@@ -67,14 +68,22 @@ const MODES = [
       </svg>
     ),
     color: "var(--flare)",
-    tag: "Fast",
+    tag: "Rapid",
     tagColor: "rgba(255,106,77,0.12)",
     tagText: "var(--flare)",
   },
 ];
 
 export function GameModes() {
+  const router = useRouter();
   const [selected, setSelected] = useState("classic");
+
+  const handleSelect = (id: string) => {
+    setSelected(id);
+    if (id === "tournament") {
+      router.push("/tournaments");
+    }
+  };
 
   return (
     <section className="mb-8">
@@ -88,7 +97,7 @@ export function GameModes() {
             <button
               key={mode.id}
               type="button"
-              onClick={() => setSelected(mode.id)}
+              onClick={() => handleSelect(mode.id)}
               className={cn(
                 "relative flex flex-col items-center text-center p-5 rounded-[18px] border transition-all hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2"
               )}

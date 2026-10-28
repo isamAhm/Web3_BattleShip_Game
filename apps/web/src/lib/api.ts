@@ -37,7 +37,6 @@ export const api = {
 
   // Leaderboard
   leaderboard: async (board: "points" | "streak" | "fastest") => {
-    // Map tab names to backend schema types ('points', 'wins', 'streak', 'accuracy')
     const typeMap: Record<string, string> = {
       points: "points",
       streak: "streak",
@@ -57,7 +56,6 @@ export const api = {
       const res = await apiFetch<any[]>(`/api/players/${player}/matches?limit=${limit}`);
       return { matches: Array.isArray(res) ? res : (res as any)?.matches ?? [] };
     }
-    // General match query or fallback
     const res = await apiFetch<any[]>(`/api/matches?limit=${limit}`).catch(() => []);
     return { matches: Array.isArray(res) ? res : (res as any)?.matches ?? [] };
   },
@@ -80,6 +78,22 @@ export const api = {
       chainStatus: data.chainStatus ?? "unverified",
       match: data,
     };
+  },
+
+  // Rewards Ledger
+  rewards: {
+    getMyLedger: () =>
+      apiFetch<{ balance: number; history: any[] }>("/api/rewards/me"),
+  },
+
+  // Tournaments
+  tournaments: {
+    list: (status?: string) =>
+      apiFetch<any[]>(`/api/tournaments${status ? `?status=${status}` : ""}`),
+    get: (id: string) =>
+      apiFetch<any>(`/api/tournaments/${id}`),
+    create: (data: any) =>
+      apiFetch<any>("/api/tournaments", { method: "POST", body: JSON.stringify(data) }),
   },
 
   // Players

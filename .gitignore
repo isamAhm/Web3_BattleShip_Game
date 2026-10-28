@@ -7,3 +7,6 @@ coverage
 *.log
 .DS_Store
 apps/web_frontend
+artifacts
+cache
+*.zip

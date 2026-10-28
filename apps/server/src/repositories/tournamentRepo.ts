@@ -3,7 +3,50 @@ import { isMongoConnected } from '../services/mongo.js';
 import crypto from 'node:crypto';
 
 class InMemoryTournamentStore {
-  public tournaments: ITournament[] = [];
+  public tournaments: ITournament[] = [
+    {
+      tournamentId: 'tourn_season_1_championship',
+      title: 'Season 1 Arena Championship',
+      description: 'Global 10×10 qualifying bracket. Match victories award double tactical points towards the 10,000 ARENA prize pool.',
+      status: 'open',
+      startTime: new Date(Date.now() - 86400000 * 2),
+      endTime: new Date(Date.now() + 86400000 * 5),
+      standings: [
+        { address: '0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1', points: 1420, wins: 14, rank: 1 },
+        { address: '0x71C8363714856E3B95B8cfcA4b77f86481775e53', points: 1180, wins: 11, rank: 2 },
+        { address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', points: 940, wins: 9, rank: 3 },
+      ],
+      createdAt: new Date(Date.now() - 86400000 * 2),
+      updatedAt: new Date(),
+    } as unknown as ITournament,
+    {
+      tournamentId: 'tourn_admirals_blitz',
+      title: "Admiral's Blitz Invitational",
+      description: 'High-speed tactical combat with 15-second turn timers. Fast-fire streaks earn bonus multipliers.',
+      status: 'open',
+      startTime: new Date(Date.now() - 86400000),
+      endTime: new Date(Date.now() + 86400000 * 2),
+      standings: [
+        { address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65', points: 820, wins: 8, rank: 1 },
+        { address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4df', points: 650, wins: 6, rank: 2 },
+      ],
+      createdAt: new Date(Date.now() - 86400000),
+      updatedAt: new Date(),
+    } as unknown as ITournament,
+    {
+      tournamentId: 'tourn_abyss_qualifier_0',
+      title: 'Abyss Sector Alpha Qualifier',
+      description: 'Concluded qualifier for elite naval commanders. Top 16 advanced to the Season 1 finals bracket.',
+      status: 'closed',
+      startTime: new Date(Date.now() - 86400000 * 7),
+      endTime: new Date(Date.now() - 86400000 * 3),
+      standings: [
+        { address: '0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1', points: 2100, wins: 20, rank: 1 },
+      ],
+      createdAt: new Date(Date.now() - 86400000 * 7),
+      updatedAt: new Date(),
+    } as unknown as ITournament,
+  ];
 
   public clear(): void {
     this.tournaments = [];

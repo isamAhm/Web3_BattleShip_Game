@@ -1,3 +1,6 @@
+"use client";
+
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { LobbyView } from "./LobbyClient";
 
@@ -82,14 +85,41 @@ export function LobbySidebar({ active, onChange }: Props) {
         );
       })}
 
+      {/* Nav Section */}
+      <div className="my-3 border-t" style={{ borderColor: "var(--line)" }} />
+      <p className="text-[11px] font-semibold tracking-widest uppercase text-[var(--mist)] px-3 mb-2">
+        Sectors
+      </p>
+      <Link
+        href="/tournaments"
+        className="flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[14px] text-[var(--mist)] hover:text-[var(--foam)] hover:bg-[var(--hull)] transition-colors"
+      >
+        <span>🏆</span>
+        Tournaments
+      </Link>
+      <Link
+        href="/rewards"
+        className="flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[14px] text-[var(--mist)] hover:text-[var(--foam)] hover:bg-[var(--hull)] transition-colors"
+      >
+        <span>🪙</span>
+        Rewards Ledger
+      </Link>
+      <Link
+        href="/leaderboard"
+        className="flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[14px] text-[var(--mist)] hover:text-[var(--foam)] hover:bg-[var(--hull)] transition-colors"
+      >
+        <span>📊</span>
+        Leaderboard
+      </Link>
+
       {/* Divider */}
-      <div className="my-4 border-t" style={{ borderColor: "var(--line)" }} />
+      <div className="my-3 border-t" style={{ borderColor: "var(--line)" }} />
 
       {/* Quick stats */}
-      <div className="px-3 grid gap-3">
-        <StatLine label="Online now" value="312" />
-        <StatLine label="Active rooms" value="48" />
-        <StatLine label="In queue" value="7" />
+      <div className="px-3 grid gap-2.5 mt-auto">
+        <StatLine label="Network" value="Sepolia" />
+        <StatLine label="Socket.IO" value="Live" />
+        <StatLine label="Mode" value="Real-Time" />
       </div>
     </aside>
   );
@@ -97,9 +127,9 @@ export function LobbySidebar({ active, onChange }: Props) {
 
 function StatLine({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between items-center text-[13px]">
+    <div className="flex justify-between items-center text-[12px]">
       <span className="text-[var(--mist)]">{label}</span>
-      <span className="font-display font-bold text-[var(--foam)]">{value}</span>
+      <span className="font-mono font-bold text-[var(--signal)]">{value}</span>
     </div>
   );
 }

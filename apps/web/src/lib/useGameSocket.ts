@@ -33,6 +33,7 @@ export interface GameSocketCallbacks {
   onTurnTimeout?:  (player: string) => void;
   onMatchEnd?:     (payload: MatchEndPayload) => void;
   onMatchVerified?:(resultHash: string) => void;
+  onRoomCreated?:  (roomCode: string) => void;
   onChatMessage?:  (sender: string, text: string, ts: number) => void;
   onInvite?:       (from: string) => void;
   onError?:        (msg: string) => void;
@@ -57,15 +58,17 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       cbRef.current.onMatchFound?.(matchId, opponent);
     });
 
-    socket.on("match:start", ({ matchId, state }: any) =>
-      cbRef.current.onMatchStart?.(matchId, state));
+    socket.on("match:start", (payload: any) => {
+      const matchId = payload?.matchId;
+      cbRef.current.onMatchStart?.(matchId, payload);
+    });
 
     socket.on("match:restore", (view: any) => {
       cbRef.current.onMatchStart?.(view?.matchId, view);
     });
 
-    socket.on("match:rejoin", ({ matchId, state }: any) =>
-      cbRef.current.onMatchRejoin?.(matchId, state));
+    socket.on("match:rejoin", (payload: any) =>
+      cbRef.current.onMatchRejoin?.(payload?.matchId, payload));
 
     socket.on("shot:result", (raw: any) => {
       const row = raw?.coordinate?.x ?? raw?.row ?? 0;
@@ -106,6 +109,11 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     socket.on("match:verified", ({ resultHash }) =>
       cbRef.current.onMatchVerified?.(resultHash));
 
+    socket.on("room:created", (data: any) => {
+      const code = data?.roomCode ?? data;
+      cbRef.current.onRoomCreated?.(code);
+    });
+
     socket.on("chat:message", ({ sender, text, ts }) =>
       cbRef.current.onChatMessage?.(sender, text, ts));
 
@@ -125,6 +133,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       socket.off("turn:timeout");
       socket.off("match:end");
       socket.off("match:verified");
+      socket.off("room:created");
       socket.off("chat:message");
       socket.off("invite:received");
       socket.off("error");
@@ -141,9 +150,28 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     getSocket().emit("queue:leave");
   }, []);
 
+  const createRoom = useCallback((customCode?: string) => {
+    return new Promise<{ ok: boolean; roomCode?: string; error?: string }>((resolve) => {
+      const s = connectSocket();
+      s.emit("room:create", { customCode }, (ack: any) => {
+        if (ack) resolve(ack);
+        else resolve({ ok: true, roomCode: customCode });
+      });
+    });
+  }, []);
+
+  const joinRoom = useCallback((roomCode: string) => {
+    return new Promise<{ ok: boolean; matchId?: string; error?: string }>((resolve) => {
+      const s = connectSocket();
+      s.emit("room:join", { roomCode }, (ack: any) => {
+        if (ack) resolve(ack);
+        else resolve({ ok: true });
+      });
+    });
+  }, []);
+
   const submitPlacement = useCallback(
     (payload: any) => {
-      // Supports both raw board and placementPayloadSchema ({ matchId, commitment, ships, mines })
       getSocket().emit("placement:submit", payload);
     }, []
   );
@@ -181,6 +209,8 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
   return {
     joinQueue,
     leaveQueue,
+    createRoom,
+    joinRoom,
     submitPlacement,
     fireShot,
     submitReveal,

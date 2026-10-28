@@ -9,6 +9,7 @@ interface AuthContextValue extends AuthState {
   login: (preferInjected?: boolean) => Promise<string>;
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
+  switchDevIdentity: () => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -40,11 +41,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // 2. Real cryptographic dev test wallet (saved in localStorage for persistence)
-    let pk = typeof window !== "undefined" ? localStorage.getItem("wba_dev_pk") : null;
+    // 2. Real cryptographic dev test wallet (saved in sessionStorage/localStorage for persistence)
+    let pk = typeof window !== "undefined" ? (sessionStorage.getItem("wba_dev_pk") || localStorage.getItem("wba_dev_pk")) : null;
     if (!pk || !pk.startsWith("0x")) {
       pk = generatePrivateKey();
       if (typeof window !== "undefined") {
+        sessionStorage.setItem("wba_dev_pk", pk);
         localStorage.setItem("wba_dev_pk", pk);
       }
     }
@@ -57,6 +59,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return await auth.verify(message, signature);
   }, [auth]);
 
+  const switchDevIdentity = useCallback(async (): Promise<string> => {
+    const chainId = 84532;
+    const newPk = generatePrivateKey();
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("wba_dev_pk", newPk);
+      localStorage.setItem("wba_dev_pk", newPk);
+    }
+    const account = privateKeyToAccount(newPk as `0x${string}`);
+    const nonce = await auth.getNonce();
+    const message = auth.buildMessage(account.address, nonce, chainId);
+    const signature = await account.signMessage({ message });
+    return await auth.verify(message, signature);
+  }, [auth]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -66,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout: auth.logout,
         checkSession: auth.checkSession,
+        switchDevIdentity,
       }}
     >
       {children}

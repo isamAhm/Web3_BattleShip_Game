@@ -6,13 +6,14 @@ import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/layout/ThemeProvider";
 import { THEMES } from "@/lib/themes";
 import { useAuthCtx } from "@/lib/AuthContext";
-import { api } from "@/lib/api";
 import { useState } from "react";
 
 const NAV_LINKS = [
   { href: "/", label: "Home" },
   { href: "/play", label: "Play" },
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/tournaments", label: "Tournaments" },
+  { href: "/rewards", label: "Rewards" },
   { href: "/replays", label: "Replays" },
 ];
 
@@ -20,13 +21,11 @@ export function Header() {
   const pathname = usePathname();
   const isLanding = pathname === "/";
   const { themeId, setTheme } = useTheme();
-  const { address, login, logout } = useAuthCtx();
+  const { address, login, logout, switchDevIdentity } = useAuthCtx();
   const [connecting, setConnecting] = useState(false);
 
   const nextTheme = THEMES.find((t) => t.id !== themeId)!;
 
-  // Demo login — signs a message with a mock wallet for testing
-  // In production this hooks into wagmi/RainbowKit
   const handleConnect = async () => {
     setConnecting(true);
     try {
@@ -58,73 +57,108 @@ export function Header() {
           style={{ background: "conic-gradient(from 200deg, var(--signal), var(--deck), var(--signal))" }}
           aria-hidden="true"
         >
-          <span className="w-2.5 h-2.5 rounded-full border-[2.5px] border-[var(--abyss)]" />
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M2 13L8 2L14 13L8 10L2 13Z" fill="var(--abyss)" stroke="var(--signal)" strokeWidth="1.2" strokeLinejoin="round" />
+          </svg>
         </span>
-        Battle Arena
+        <span className="text-[var(--foam)]">
+          Web3 <span style={{ color: "var(--signal)" }}>Battle Arena</span>
+        </span>
       </Link>
 
       {/* Nav */}
-      <nav aria-label="Main" className="hidden md:flex gap-1 mr-auto">
-        {NAV_LINKS.map(({ href, label }) => {
-          const active = pathname === href;
+      <nav className="hidden md:flex items-center gap-1 ml-2">
+        {NAV_LINKS.map((link) => {
+          const active =
+            link.href === "/"
+              ? pathname === "/"
+              : pathname.startsWith(link.href);
           return (
             <Link
-              key={href}
-              href={href}
-              aria-current={active ? "page" : undefined}
+              key={link.href}
+              href={link.href}
               className={cn(
-                "px-3.5 py-2 rounded-[10px] font-medium transition-colors text-[var(--mist)] hover:text-[var(--foam)]",
-                active && "bg-[var(--hull)] text-[var(--foam)]"
+                "px-3.5 py-1.5 rounded-[9px] text-[13.5px] font-semibold transition-all",
+                active
+                  ? "text-[var(--foam)] shadow-sm"
+                  : "text-[var(--mist)] hover:text-[var(--foam)] hover:bg-[var(--hull)]"
               )}
+              style={
+                active
+                  ? {
+                      background: "rgba(53,214,192,0.1)",
+                      color: "var(--signal)",
+                    }
+                  : undefined
+              }
             >
-              {label}
+              {link.label}
             </Link>
           );
         })}
       </nav>
 
-      <div className="ml-auto md:ml-0 flex items-center gap-2">
-        {/* Quick theme toggle */}
+      <div className="ml-auto flex items-center gap-3">
+        {/* Quick Theme Toggle */}
         <button
           type="button"
           onClick={() => setTheme(nextTheme.id)}
+          className="w-9 h-9 rounded-[10px] grid place-items-center border transition-all hover:bg-[var(--hull)] hover:-translate-y-px"
+          style={{
+            borderColor: "var(--line)",
+            background: "rgba(12,34,43,0.5)",
+          }}
           title={`Switch to ${nextTheme.name} theme`}
-          className="w-9 h-9 rounded-[10px] grid place-items-center border transition-all hover:-translate-y-px"
-          style={{ background: "var(--hull)", borderColor: "var(--line)" }}
           aria-label={`Switch to ${nextTheme.name} theme`}
         >
           <ThemeToggleIcon themeId={themeId} />
         </button>
 
-        {/* Settings */}
+        {/* Settings link */}
         <Link
           href="/settings"
-          title="Settings"
-          className={cn(
-            "w-9 h-9 rounded-[10px] grid place-items-center border transition-all hover:-translate-y-px",
-            pathname === "/settings" && "bg-[var(--hull)]"
-          )}
-          style={{ borderColor: "var(--line)" }}
-          aria-label="Settings"
+          className="w-9 h-9 rounded-[10px] grid place-items-center border transition-all hover:bg-[var(--hull)] hover:-translate-y-px"
+          style={{
+            borderColor: "var(--line)",
+            background: "rgba(12,34,43,0.5)",
+          }}
+          title="Theme & Arena Settings"
+          aria-label="Theme & Arena Settings"
         >
           <SettingsIcon />
         </Link>
 
-        {/* Network pill */}
-        {!isLanding && address && (
-          <div className="hidden lg:flex items-center gap-2 text-[var(--mist)] text-[13px] ml-1">
+        {/* Network Pill */}
+        {address && (
+          <div
+            className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[12px] font-mono font-medium"
+            style={{
+              background: "rgba(53,214,192,0.06)",
+              borderColor: "rgba(53,214,192,0.25)",
+              color: "var(--signal)",
+            }}
+          >
             <span
-              className="w-2 h-2 rounded-full flex-none"
-              style={{ background: "var(--signal)", boxShadow: "0 0 10px var(--signal)" }}
-              aria-hidden="true"
+              className="w-1.5 h-1.5 rounded-full animate-pulse"
+              style={{ background: "var(--signal)" }}
             />
             Base Sepolia
           </div>
         )}
 
-        {/* Wallet */}
+        {/* Wallet & Identity Controls */}
         {address ? (
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={switchDevIdentity}
+              className="text-[11px] font-mono px-2.5 py-1.5 rounded-[9px] bg-[rgba(53,214,192,0.12)] text-[var(--signal)] hover:bg-[rgba(53,214,192,0.22)] border border-[rgba(53,214,192,0.3)] transition-all font-semibold flex items-center gap-1"
+              title="Spawn fresh player identity for 2-browser testing"
+            >
+              <span>⚡</span>
+              <span className="hidden sm:inline">New Player</span>
+            </button>
+
             <div
               className="hidden sm:flex items-center gap-2.5 pl-3.5 pr-2 py-1.5 rounded-full border font-semibold"
               style={{ background: "var(--deck)", borderColor: "var(--line)" }}
@@ -136,10 +170,11 @@ export function Header() {
                 aria-label="Avatar"
               />
             </div>
+
             <button
               type="button"
               onClick={logout}
-              className="text-[12px] text-[var(--mist)] hover:text-[var(--flare)] transition-colors px-2"
+              className="text-[12px] text-[var(--mist)] hover:text-red-400 transition-colors px-2 font-bold"
               title="Disconnect wallet"
             >
               ✕
@@ -194,8 +229,9 @@ function SettingsIcon() {
 function WalletIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="1.5" y="3" width="13" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M11 8h2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2 6h12" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="11.5" cy="9.5" r="1" fill="currentColor" />
     </svg>
   );
 }
