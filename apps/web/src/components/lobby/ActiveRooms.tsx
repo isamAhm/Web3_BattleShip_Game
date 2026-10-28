@@ -29,10 +29,11 @@ export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
       const data = await api.activeRoomsAndMatches();
       const waiting = (data.rooms || []).map((r: any) => ({
         id: r.id || r.roomCode,
-        roomCode: r.roomCode,
-        name: r.name || `Room ${r.roomCode}`,
+        roomCode: r.isPrivate ? undefined : r.roomCode,
+        name: r.name || (r.isPrivate ? `🔒 Private Sector (${r.host})` : `Room ${r.roomCode}`),
         host: r.host || "Host Commander",
-        mode: r.mode || "Classic",
+        mode: r.isPrivate ? "Private" : (r.mode || "Classic"),
+        isPrivate: r.isPrivate ?? true,
         players: r.players || "1/2",
         mines: r.mines ?? 3,
         status: "waiting",
@@ -43,7 +44,7 @@ export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
         id: m.id || m.matchId,
         matchId: m.matchId,
         roomCode: m.roomCode,
-        name: m.name || `Match ${m.matchId.slice(0, 8)}`,
+        name: m.name || `Battle ${m.matchId.slice(0, 8)}`,
         host: m.host || "Commander Alpha",
         opponent: m.opponent,
         mode: m.mode || "Classic",
@@ -94,7 +95,7 @@ export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
             type="button"
             onClick={() => fetchRooms(true)}
             disabled={isRefreshing}
-            className="p-1.5 rounded-[8px] text-[var(--mist)] hover:text-[var(--foam)] transition-colors border border-[var(--line)] hover:bg-[var(--hull)] text-xs flex items-center gap-1"
+            className="p-1.5 rounded-[8px] text-[var(--mist)] hover:text-[var(--foam)] transition-colors border border-[var(--line)] hover:bg-[var(--hull)] text-xs flex items-center gap-1 cursor-pointer"
             title="Refresh active rooms"
           >
             <svg
@@ -125,7 +126,7 @@ export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
                 type="button"
                 onClick={() => setFilter(f)}
                 className={cn(
-                  "px-3 py-1.5 rounded-[7px] text-[13px] font-medium capitalize transition-colors",
+                  "px-3 py-1.5 rounded-[7px] text-[13px] font-medium capitalize transition-colors cursor-pointer",
                   filter === f
                     ? "bg-[var(--hull)] text-[var(--foam)]"
                     : "text-[var(--mist)] hover:text-[var(--foam)]"
@@ -198,7 +199,12 @@ export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
               <div className="min-w-0">
                 <div className="font-medium text-[14px] truncate flex items-center gap-2">
                   <span>{room.name}</span>
-                  {room.roomCode && (
+                  {room.isPrivate && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[rgba(235,181,74,0.12)] text-[var(--brass)] border border-[rgba(235,181,74,0.25)]">
+                      Code Required
+                    </span>
+                  )}
+                  {room.roomCode && !room.isPrivate && (
                     <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-[rgba(53,214,192,0.1)] text-[var(--signal)]">
                       {room.roomCode}
                     </span>
@@ -255,32 +261,23 @@ export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
               {/* Action */}
               <div className="flex justify-end">
                 {room.status === "waiting" ? (
-                  onJoinRoom && room.roomCode ? (
-                    <button
-                      type="button"
-                      onClick={() => onJoinRoom(room.roomCode)}
-                      className="px-4 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
-                      style={{
-                        background: "var(--accent-cta)",
-                        color: "var(--cta-text)",
-                        boxShadow: "0 4px 16px -4px var(--cta-shadow)",
-                      }}
-                    >
-                      Join
-                    </button>
-                  ) : (
-                    <Link
-                      href={room.roomCode ? `/play?join=${room.roomCode}` : "/arena"}
-                      className="px-4 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
-                      style={{
-                        background: "var(--accent-cta)",
-                        color: "var(--cta-text)",
-                        boxShadow: "0 4px 16px -4px var(--cta-shadow)",
-                      }}
-                    >
-                      Join
-                    </Link>
-                  )
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Private rooms must require the player to enter the secret code themselves!
+                      if (onJoinRoom) {
+                        onJoinRoom("");
+                      }
+                    }}
+                    className="px-4 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px cursor-pointer"
+                    style={{
+                      background: "var(--accent-cta)",
+                      color: "var(--cta-text)",
+                      boxShadow: "0 4px 16px -4px var(--cta-shadow)",
+                    }}
+                  >
+                    Join
+                  </button>
                 ) : (
                   <Link
                     href={`/arena?match=${room.matchId || room.id}&spectate=true`}

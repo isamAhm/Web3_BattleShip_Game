@@ -1330,9 +1330,39 @@ export function ArenaClient() {
         className="lower-grid grid gap-5 mt-6"
         style={{ gridTemplateColumns: "1.3fr 1fr 1fr" }}
       >
-        <LeaderboardPanel entries={LEADERBOARD} />
-        <BadgesPanel badges={BADGES} collected={3} total={5} />
-        <MatchRecord steps={MATCH_STEPS} hash={matchIdParam ?? "solo-ai-combat"} />
+        <LeaderboardPanel />
+        <BadgesPanel />
+        <MatchRecord
+          steps={[
+            {
+              label: "Fleet Commitment & Salt",
+              description: phase === "placement" ? "Arranging ships & generating cryptographic salt" : "Fleet commitments hashed and locked",
+              status: phase === "placement" ? "active" : "done",
+            },
+            {
+              label: "Salvo Exchange & Radar",
+              description:
+                phase === "placement"
+                  ? "Awaiting both commanders to deploy fleets"
+                  : phase === "battle"
+                  ? `Active salvo exchange (${isMyTurn ? "Your Fire" : "Opponent Fire"})`
+                  : "Naval engagements concluded. All primary targets neutralized.",
+              status: phase === "placement" ? "pending" : phase === "battle" ? "active" : "done",
+            },
+            {
+              label: "Proof Verification & Scoring",
+              description:
+                phase !== "ended"
+                  ? "Audit record will generate upon match conclusion"
+                  : bannerAlert?.type === "win"
+                  ? `Outcome verified: Victory (${playerScore} pts)`
+                  : `Outcome verified: Match concluded (${playerScore} pts)`,
+              status: phase !== "ended" ? "pending" : "done",
+            },
+          ]}
+          hash={matchIdParam ? `match:${matchIdParam}` : "local:solo-ai-tactical"}
+          matchId={matchIdParam}
+        />
       </div>
     </main>
   );

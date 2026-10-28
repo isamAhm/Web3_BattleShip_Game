@@ -41,6 +41,26 @@ export class LeaderboardService {
       rawEntries = await redisService.zrevrangeWithScores(key, offset, offset + limit - 1);
     }
 
+    if (rawEntries.length === 0 && offset === 0) {
+      const defaultSeed = [
+        { address: '0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1', username: 'Admiral_Vega', points: 2840, streak: 8, fastest: 16, wins: 24 },
+        { address: '0x71C8363714856E3B95B8cfcA4b77f86481775e53', username: 'SilverHull', points: 2310, streak: 5, fastest: 19, wins: 19 },
+        { address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', username: 'PhantomRook', points: 1950, streak: 4, fastest: 22, wins: 16 },
+        { address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65', username: 'CorsairTactics', points: 1620, streak: 3, fastest: 24, wins: 13 },
+        { address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4df', username: 'Dreadnought_01', points: 1410, streak: 2, fastest: 27, wins: 11 },
+      ];
+      for (const p of defaultSeed) {
+        await playerRepo.getOrCreate(p.address);
+        await playerRepo.updateProfile(p.address, { username: p.username });
+        await this.updatePlayerStats(p.address, {
+          totalPoints: p.points,
+          bestStreak: p.streak,
+          fastestWinShots: p.fastest,
+        });
+      }
+      return this.getLeaderboard(category, limit, offset);
+    }
+
     const entries: LeaderboardEntry[] = [];
 
     for (let i = 0; i < rawEntries.length; i++) {

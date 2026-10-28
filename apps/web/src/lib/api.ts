@@ -40,7 +40,7 @@ export const api = {
     const typeMap: Record<string, string> = {
       points: "points",
       streak: "streak",
-      fastest: "accuracy",
+      fastest: "fastest_win",
     };
     const mapped = typeMap[board] || board;
     const res = await apiFetch<{ category?: string; entries: any[] }>(`/api/leaderboards/${mapped}`);

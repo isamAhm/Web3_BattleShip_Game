@@ -111,6 +111,20 @@ export function LobbySidebar({ active, onChange }: Props) {
         <span>📊</span>
         Leaderboard
       </Link>
+      <Link
+        href="/badges"
+        className="flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[14px] text-[var(--mist)] hover:text-[var(--foam)] hover:bg-[var(--hull)] transition-colors"
+      >
+        <span>🎖️</span>
+        Badges
+      </Link>
+      <Link
+        href="/replays"
+        className="flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[14px] text-[var(--mist)] hover:text-[var(--foam)] hover:bg-[var(--hull)] transition-colors"
+      >
+        <span>📼</span>
+        Replays
+      </Link>
 
       {/* Divider */}
       <div className="my-3 border-t" style={{ borderColor: "var(--line)" }} />

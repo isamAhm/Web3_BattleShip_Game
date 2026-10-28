@@ -106,17 +106,23 @@ export default function TournamentsPage() {
           </p>
         </div>
 
-        <Link
-          href="/play"
-          className="flex items-center gap-2 px-5 py-2.5 rounded-[12px] font-bold text-[14px] transition-all hover:-translate-y-px"
+        <button
+          type="button"
+          onClick={() => {
+            if (tournaments.length > 0) {
+              setSelectedTournament(tournaments[0]);
+              setActiveTab("bracket");
+            }
+          }}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-[12px] font-bold text-[14px] transition-all hover:-translate-y-px cursor-pointer"
           style={{
             background: "var(--accent-cta)",
             color: "var(--cta-text)",
             boxShadow: "0 4px 18px -4px var(--cta-shadow)",
           }}
         >
-          ⚔️ Enter Active Arena
-        </Link>
+          🏆 Championship Sector Bracket
+        </button>
       </div>
 
       {/* Tournaments Grid */}
@@ -138,13 +144,6 @@ export default function TournamentsPage() {
             <p className="text-[13px] text-[var(--mist)] mt-1.5 max-w-md mx-auto">
               All matches played in ranked Quick Match automatically accrue points toward the Season 1 global standings.
             </p>
-            <Link
-              href="/play"
-              className="inline-block mt-5 px-6 py-2.5 rounded-[12px] font-bold text-[14px]"
-              style={{ background: "var(--accent-cta)", color: "var(--cta-text)" }}
-            >
-              Queue For Ranked Match
-            </Link>
           </div>
         ) : (
           tournaments.map((t) => {
@@ -275,7 +274,7 @@ export default function TournamentsPage() {
               <button
                 type="button"
                 onClick={() => setSelectedTournament(null)}
-                className="w-8 h-8 rounded-full grid place-items-center hover:bg-[var(--hull)] text-[var(--mist)] hover:text-white transition-colors"
+                className="w-8 h-8 rounded-full grid place-items-center hover:bg-[var(--hull)] text-[var(--mist)] hover:text-white transition-colors cursor-pointer"
                 aria-label="Close"
               >
                 ✕
@@ -291,7 +290,7 @@ export default function TournamentsPage() {
                     type="button"
                     onClick={() => setActiveTab(tab)}
                     className={cn(
-                      "px-4 py-1.5 rounded-[8px] text-[13px] font-semibold transition-colors capitalize",
+                      "px-4 py-1.5 rounded-[8px] text-[13px] font-semibold transition-colors capitalize cursor-pointer",
                       activeTab === tab
                         ? "bg-[var(--hull)] text-[var(--signal)] border border-[rgba(53,214,192,0.3)]"
                         : "text-[var(--mist)] hover:text-[var(--foam)]"
@@ -310,9 +309,9 @@ export default function TournamentsPage() {
                       type="button"
                       onClick={() => {
                         setSelectedTournament(null);
-                        router.push("/arena");
+                        router.push(`/arena?mode=tournament&tournamentId=${selectedTournament.tournamentId}`);
                       }}
-                      className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
+                      className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px cursor-pointer"
                       style={{ background: "var(--accent-cta)", color: "var(--cta-text)" }}
                     >
                       ⚔️ Launch Tournament Match
@@ -322,7 +321,7 @@ export default function TournamentsPage() {
                       type="button"
                       onClick={() => handleRegister(selectedTournament.tournamentId)}
                       disabled={isRegistering}
-                      className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px disabled:opacity-50"
+                      className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px disabled:opacity-50 cursor-pointer"
                       style={{ background: "var(--brass)", color: "#06141a" }}
                     >
                       {isRegistering ? "Registering…" : "Register Commander (+100 PTS)"}
@@ -519,7 +518,7 @@ export default function TournamentsPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedTournament(null)}
-                  className="px-4 py-2 rounded-[10px] text-[13px] font-semibold border border-[var(--line)] hover:bg-[var(--hull)] text-[var(--mist)]"
+                  className="px-4 py-2 rounded-[10px] text-[13px] font-semibold border border-[var(--line)] hover:bg-[var(--hull)] text-[var(--mist)] cursor-pointer"
                 >
                   Close
                 </button>
@@ -528,19 +527,25 @@ export default function TournamentsPage() {
                     type="button"
                     onClick={() => handleRegister(selectedTournament.tournamentId)}
                     disabled={isRegistering}
-                    className="px-5 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
+                    className="px-5 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px cursor-pointer"
                     style={{ background: "var(--accent-cta)", color: "var(--cta-text)" }}
                   >
-                    {isRegistering ? "Registering…" : "Register Now"}
+                    {isRegistering ? "Registering…" : "Register Commander"}
                   </button>
                 )}
-                <Link
-                  href="/play"
-                  className="px-5 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
-                  style={{ background: "var(--hull)", color: "var(--foam)", border: "1px solid var(--line)" }}
-                >
-                  Queue for Battle →
-                </Link>
+                {selectedTournament.status === "open" && isUserRegistered(selectedTournament) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedTournament(null);
+                      router.push(`/arena?mode=tournament&tournamentId=${selectedTournament.tournamentId}`);
+                    }}
+                    className="px-5 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px cursor-pointer"
+                    style={{ background: "var(--accent-cta)", color: "var(--cta-text)" }}
+                  >
+                    ⚔️ Launch Tournament Match →
+                  </button>
+                )}
               </div>
             </div>
           </div>

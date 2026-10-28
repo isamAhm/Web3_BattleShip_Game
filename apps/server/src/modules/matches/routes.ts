@@ -12,10 +12,11 @@ matchesRouter.get('/active', async (req: Request, res: Response) => {
   try {
     const waitingRooms = matchmakingService.listPrivateRooms().map((r) => ({
       id: r.code,
-      roomCode: r.code,
-      name: `${r.host.slice(0, 6)}…'s Fleet`,
+      roomCode: r.isPrivate ? undefined : r.code,
+      name: r.isPrivate ? `🔒 Private Room (${r.host.slice(0, 6)}…)` : `${r.host.slice(0, 6)}…'s Fleet`,
       host: `${r.host.slice(0, 6)}…${r.host.slice(-4)}`,
-      mode: 'Classic',
+      mode: r.isPrivate ? 'Private' : 'Classic',
+      isPrivate: r.isPrivate ?? true,
       players: '1/2',
       mines: 3,
       status: 'waiting',
@@ -47,6 +48,33 @@ matchesRouter.get('/active', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+matchesRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 20, 50);
+    const offset = Number(req.query.offset) || 0;
+    const player = req.query.player as string | undefined;
+
+    let matches;
+    if (player) {
+      matches = await matchRepo.findByPlayer(player, limit, offset);
+    } else {
+      matches = await matchRepo.listAll(limit, offset);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        matches,
+        limit,
+        offset,
+        total: matches.length,
+      },
+    });
+  } catch (err) {
+    next(err);
   }
 });
 

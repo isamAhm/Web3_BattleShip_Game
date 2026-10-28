@@ -12,6 +12,7 @@ export interface PrivateRoom {
   host: string;
   guest?: string;
   matchId?: string;
+  isPrivate?: boolean;
   createdAt: number;
 }
 
@@ -80,6 +81,7 @@ export class MatchmakingService {
     this.privateRooms.set(code, {
       code,
       host: norm,
+      isPrivate: true,
       createdAt: Date.now(),
     });
 
