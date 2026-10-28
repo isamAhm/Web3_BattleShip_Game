@@ -119,11 +119,12 @@ export function ArenaClient() {
   const [phase, setPhase] = useState<"placement" | "battle" | "ended">("placement");
 
   // Player Placement State
-  const initialFleet = useMemo(() => generateRandomFleet(), []);
-  const [playerShips, setPlayerShips] = useState<PlacedShip[]>(initialFleet.ships);
-  const [playerMines, setPlayerMines] = useState<string[]>(initialFleet.mines);
+  const [playerShips, setPlayerShips] = useState<PlacedShip[]>([]);
+  const [playerMines, setPlayerMines] = useState<string[]>([]);
   const [selectedShipType, setSelectedShipType] = useState<ShipType>("carrier");
   const [isVertical, setIsVertical] = useState(false);
+  const [placementReady, setPlacementReady] = useState(false);
+  const [placementMode, setPlacementMode] = useState<"ships" | "mines">("ships");
 
   // Hidden Enemy Fleet (AI or Opponent)
   const [enemyShips, setEnemyShips] = useState<PlacedShip[]>(() => generateRandomFleet().ships);
@@ -134,6 +135,16 @@ export function ArenaClient() {
   const [foeCells, setFoeCells] = useState<BoardCells>({});
   const [aimCell, setAimCell] = useState<string | null>(null);
   const [aimLabel, setAimLabel] = useState("Pick a cell");
+
+  // Build mine indicators for player board during placement
+  const myBoardCellsWithMines = useMemo(() => {
+    if (phase !== "placement") return myBoardCells;
+    const cells = { ...myBoardCells };
+    playerMines.forEach((mineKey) => {
+      cells[mineKey] = "mine";
+    });
+    return cells;
+  }, [myBoardCells, playerMines, phase]);
 
   // Scores and Streaks
   const [playerScore, setPlayerScore] = useState(0);
@@ -192,8 +203,8 @@ export function ArenaClient() {
     onShotResult: (result) => {
       const key = `${result.row},${result.col}`;
       const isMe = result.shooter && address ? result.shooter.toLowerCase() === address.toLowerCase() : false;
-      const rowLetter = LETTERS[result.row] ?? "A";
-      const targetLabel = `${rowLetter}${result.col + 1}`;
+      const colLetter = LETTERS[result.col] ?? "A";
+      const targetLabel = `${colLetter}${result.row + 1}`;
 
       if (isMe) {
         setFoeCells((prev) => ({ ...prev, [key]: result.outcome as any }));
@@ -359,18 +370,52 @@ export function ArenaClient() {
     const fresh = generateRandomFleet();
     setPlayerShips(fresh.ships);
     setPlayerMines(fresh.mines);
+    setPlacementReady(true);
     setStatusMsg("Fleet tactically randomized across the grid. Ready to deploy!");
   };
 
   const handleClearBoard = () => {
     setPlayerShips([]);
     setPlayerMines([]);
+    setPlacementReady(false);
     setStatusMsg("Board cleared. Select a ship from the palette and click on the grid.");
   };
 
   const handlePlayerBoardClick = (label: string, key: string) => {
     if (phase !== "placement") return;
     const [r, c] = key.split(",").map(Number);
+
+    // Handle mine placement
+    if (placementMode === "mines") {
+      // Check if cell is occupied by a ship
+      const occupied = new Set<string>();
+      playerShips.forEach((s) => s.cells.forEach((cell) => occupied.add(cell)));
+
+      if (occupied.has(key)) {
+        setStatusMsg(`Cannot place mine at ${label} (overlaps with ship).`);
+        return;
+      }
+
+      // Toggle mine placement
+      if (playerMines.includes(key)) {
+        // Remove mine
+        setPlayerMines((prev) => prev.filter((m) => m !== key));
+        setStatusMsg(`Removed mine from ${label}.`);
+      } else {
+        // Add mine (max 3)
+        if (playerMines.length >= 3) {
+          setStatusMsg(`Maximum 3 mines allowed. Click an existing mine to remove it first.`);
+          return;
+        }
+        setPlayerMines((prev) => [...prev, key]);
+        setStatusMsg(`Placed mine at ${label}. ${3 - playerMines.length - 1} remaining.`);
+      }
+
+      setPlacementReady(playerShips.length === 5 && playerMines.length + (playerMines.includes(key) ? 0 : 1) === 3);
+      return;
+    }
+
+    // Handle ship placement
     const def = SHIP_DEFS.find((d) => d.type === selectedShipType)!;
 
     // Check bounds
@@ -401,6 +446,13 @@ export function ArenaClient() {
       cells.push(ck);
     }
 
+    // Check collision with mines
+    const minesToRemove = cells.filter((cell) => playerMines.includes(cell));
+    if (minesToRemove.length > 0) {
+      setPlayerMines((prev) => prev.filter((m) => !minesToRemove.includes(m)));
+      setStatusMsg(`Placed ${def.name} at ${label}. Removed ${minesToRemove.length} mine(s) from occupied cells.`);
+    }
+
     // Place or relocate ship
     const updated = playerShips.filter((s) => s.type !== selectedShipType);
     updated.push({
@@ -414,13 +466,23 @@ export function ArenaClient() {
       hits: 0,
     });
     setPlayerShips(updated);
-    setStatusMsg(`Placed ${def.name} at ${label}.`);
+    if (minesToRemove.length === 0) {
+      setStatusMsg(`Placed ${def.name} at ${label}.`);
+    }
+
+    // Check if all ships are placed
+    const allPlaced = updated.length === 5;
+    setPlacementReady(allPlaced && playerMines.length - minesToRemove.length === 3);
 
     // Auto-advance to next unplaced ship
     const placedTypes = new Set(updated.map((s) => s.type));
     const nextUnplaced = SHIP_DEFS.find((d) => !placedTypes.has(d.type));
     if (nextUnplaced) {
       setSelectedShipType(nextUnplaced.type);
+    } else if (playerMines.length - minesToRemove.length < 3) {
+      // All ships placed, switch to mine mode
+      setPlacementMode("mines");
+      setStatusMsg(`All ships placed! Now place your 3 tactical mines.`);
     }
   };
 
@@ -430,16 +492,21 @@ export function ArenaClient() {
       return;
     }
 
+    if (playerMines.length < 3) {
+      setStatusMsg(`Please place all 3 mines (${playerMines.length} of 3 placed).`);
+      return;
+    }
+
     if (matchIdParam) {
       const engineShips = playerShips.map((s) => ({
-        x: s.col,
-        y: s.row,
+        x: s.row,
+        y: s.col,
         length: s.size,
         orientation: s.vertical ? ("V" as const) : ("H" as const),
       }));
       const engineMines = playerMines.map((m) => {
         const [r, c] = m.split(",").map(Number);
-        return { x: c, y: r };
+        return { x: r, y: c };
       });
       const salt = generateSalt();
       const commitment = commitPlacement({ ships: engineShips, mines: engineMines }, salt);
@@ -453,6 +520,7 @@ export function ArenaClient() {
       });
 
       setStatusMsg("Fleet deployed to battle net! Waiting for opponent confirmation...");
+      setPlacementReady(false);
       return;
     }
 
@@ -785,20 +853,20 @@ export function ArenaClient() {
                   bannerAlert.type === "win"
                     ? "rgba(53,214,192,0.15)"
                     : bannerAlert.type === "lose"
-                    ? "rgba(255,106,77,0.15)"
-                    : "rgba(235,181,74,0.15)",
+                      ? "rgba(255,106,77,0.15)"
+                      : "rgba(235,181,74,0.15)",
                 borderColor:
                   bannerAlert.type === "win"
                     ? "var(--signal)"
                     : bannerAlert.type === "lose"
-                    ? "var(--flare)"
-                    : "var(--brass)",
+                      ? "var(--flare)"
+                      : "var(--brass)",
                 color:
                   bannerAlert.type === "win"
                     ? "var(--signal)"
                     : bannerAlert.type === "lose"
-                    ? "var(--flare)"
-                    : "var(--brass)",
+                      ? "var(--flare)"
+                      : "var(--brass)",
               }}
             >
               <span>{bannerAlert.text}</span>
@@ -880,21 +948,38 @@ export function ArenaClient() {
             >
               <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
                 <span className="font-display font-bold text-[16px] text-[var(--signal)]">
-                  1. Select a Vessel to Place ({playerShips.length}/5 Placed)
+                  {placementMode === "ships"
+                    ? `1. Select a Vessel to Place (${playerShips.length}/5 Placed)`
+                    : `2. Place Tactical Mines (${playerMines.length}/3 Placed)`
+                  }
                 </span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsVertical((v) => !v)}
+                    onClick={() => setPlacementMode(placementMode === "ships" ? "mines" : "ships")}
                     className="px-3.5 py-2 rounded-[10px] text-[13px] font-bold border transition-all hover:-translate-y-px"
                     style={{
-                      background: "var(--hull)",
-                      borderColor: "var(--line)",
-                      color: "var(--foam)",
+                      background: placementMode === "mines" ? "rgba(235,181,74,0.12)" : "var(--hull)",
+                      borderColor: placementMode === "mines" ? "rgba(235,181,74,0.3)" : "var(--line)",
+                      color: placementMode === "mines" ? "var(--brass)" : "var(--foam)",
                     }}
                   >
-                    Orientation: {isVertical ? "Vertical ⬍" : "Horizontal ⬌"}
+                    Mode: {placementMode === "ships" ? "⚓ Ships" : "💣 Mines"}
                   </button>
+                  {placementMode === "ships" && (
+                    <button
+                      type="button"
+                      onClick={() => setIsVertical((v) => !v)}
+                      className="px-3.5 py-2 rounded-[10px] text-[13px] font-bold border transition-all hover:-translate-y-px"
+                      style={{
+                        background: "var(--hull)",
+                        borderColor: "var(--line)",
+                        color: "var(--foam)",
+                      }}
+                    >
+                      Orientation: {isVertical ? "Vertical ⬍" : "Horizontal ⬌"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleRandomizePlacement}
@@ -918,58 +1003,81 @@ export function ArenaClient() {
               </div>
 
               {/* Ship Selector Palette */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-5">
-                {SHIP_DEFS.map((def) => {
-                  const placed = playerShips.find((s) => s.type === def.type);
-                  const active = selectedShipType === def.type;
-                  return (
-                    <button
-                      key={def.type}
-                      type="button"
-                      onClick={() => setSelectedShipType(def.type)}
-                      className="p-3 rounded-[12px] border flex flex-col items-center text-center transition-all hover:-translate-y-0.5"
-                      style={{
-                        background: active
-                          ? "rgba(53,214,192,0.15)"
-                          : placed
-                          ? "rgba(19,48,59,0.5)"
-                          : "rgba(6,20,26,0.6)",
-                        borderColor: active
-                          ? "var(--signal)"
-                          : placed
-                          ? "rgba(53,214,192,0.4)"
-                          : "var(--line)",
-                      }}
-                    >
-                      <span className="text-[20px] mb-1">{def.icon}</span>
-                      <strong className="text-[13px] font-bold block">{def.name}</strong>
-                      <span className="text-[11px] text-[var(--mist)] mt-0.5">
-                        {def.size} cells {placed ? "✓ Placed" : "· Ready"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              {placementMode === "ships" && (
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-5">
+                  {SHIP_DEFS.map((def) => {
+                    const placed = playerShips.find((s) => s.type === def.type);
+                    const active = selectedShipType === def.type;
+                    return (
+                      <button
+                        key={def.type}
+                        type="button"
+                        onClick={() => setSelectedShipType(def.type)}
+                        className="p-3 rounded-[12px] border flex flex-col items-center text-center transition-all hover:-translate-y-0.5"
+                        style={{
+                          background: active
+                            ? "rgba(53,214,192,0.15)"
+                            : placed
+                              ? "rgba(19,48,59,0.5)"
+                              : "rgba(6,20,26,0.6)",
+                          borderColor: active
+                            ? "var(--signal)"
+                            : placed
+                              ? "rgba(53,214,192,0.4)"
+                              : "var(--line)",
+                        }}
+                      >
+                        <span className="text-[20px] mb-1">{def.icon}</span>
+                        <strong className="text-[13px] font-bold block">{def.name}</strong>
+                        <span className="text-[11px] text-[var(--mist)] mt-0.5">
+                          {def.size} cells {placed ? "✓ Placed" : "· Ready"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Mine Placement Info */}
+              {placementMode === "mines" && (
+                <div className="mb-5 p-4 rounded-[12px] border" style={{
+                  background: "rgba(235,181,74,0.08)",
+                  borderColor: "rgba(235,181,74,0.2)",
+                }}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[32px]">💣</span>
+                    <div>
+                      <strong className="block text-[14px] font-bold text-[var(--brass)]">
+                        Tactical Mines · Click grid cells to place or remove
+                      </strong>
+                      <p className="text-[12px] text-[var(--mist)] mt-1">
+                        Mines deal damage to opponents but cannot overlap with your ships.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-between pt-2 border-t border-[var(--line)] flex-wrap gap-3">
                 <span className="text-[13px] text-[var(--mist)]">
-                  Click on the grid below to position the selected vessel.
+                  {placementMode === "ships"
+                    ? "Click on the grid below to position the selected vessel."
+                    : "Click on empty grid cells to place mines (max 3). Click placed mines to remove."
+                  }
                 </span>
                 <button
                   type="button"
-                  disabled={playerShips.length < 5}
+                  disabled={!placementReady}
                   onClick={handleDeployFleet}
                   className="px-6 py-3 rounded-[12px] font-display font-extrabold text-[15px] uppercase tracking-wide transition-all hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
-                    background:
-                      playerShips.length === 5
-                        ? "var(--accent-cta)"
-                        : "var(--hull)",
-                    color: playerShips.length === 5 ? "var(--cta-text)" : "var(--mist)",
-                    boxShadow:
-                      playerShips.length === 5
-                        ? "0 6px 24px -4px var(--cta-shadow)"
-                        : "none",
+                    background: placementReady
+                      ? "var(--accent-cta)"
+                      : "var(--hull)",
+                    color: placementReady ? "var(--cta-text)" : "var(--mist)",
+                    boxShadow: placementReady
+                      ? "0 6px 24px -4px var(--cta-shadow)"
+                      : "none",
                   }}
                 >
                   Deploy Fleet & Start Battle ⚔️
@@ -990,7 +1098,7 @@ export function ArenaClient() {
               </h2>
               <GameBoard
                 id="mine"
-                cells={myBoardCells}
+                cells={myBoardCellsWithMines}
                 ships={playerBoardShips}
                 onCellClick={phase === "placement" ? handlePlayerBoardClick : undefined}
               />
