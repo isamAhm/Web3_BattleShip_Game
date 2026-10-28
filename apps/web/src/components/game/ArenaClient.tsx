@@ -192,8 +192,8 @@ export function ArenaClient() {
     onShotResult: (result) => {
       const key = `${result.row},${result.col}`;
       const isMe = result.shooter && address ? result.shooter.toLowerCase() === address.toLowerCase() : false;
-      const colLetter = LETTERS[result.col] ?? "A";
-      const targetLabel = `${colLetter}${result.row + 1}`;
+      const rowLetter = LETTERS[result.row] ?? "A";
+      const targetLabel = `${rowLetter}${result.col + 1}`;
 
       if (isMe) {
         setFoeCells((prev) => ({ ...prev, [key]: result.outcome as any }));
