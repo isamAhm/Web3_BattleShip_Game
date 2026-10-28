@@ -29,9 +29,13 @@ export interface AuthenticatedSocket extends Socket {
 export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: '*', // dynamically handled in prod via web origin
+      origin: (origin, callback) => {
+        // Reflect origin so Access-Control-Allow-Credentials: true is valid in browsers
+        callback(null, true);
+      },
       credentials: true,
     },
+    transports: ['websocket', 'polling'],
     pingInterval: 10000,
     pingTimeout: 5000,
   });

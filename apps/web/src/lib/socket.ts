@@ -22,6 +22,7 @@ export function getSocket(token?: string): Socket {
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       timeout: 5000,
+      transports: ["websocket", "polling"],
     });
 
     _socket.on("connect", () => {
