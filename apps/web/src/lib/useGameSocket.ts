@@ -71,8 +71,8 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       cbRef.current.onMatchRejoin?.(payload?.matchId, payload));
 
     socket.on("shot:result", (raw: any) => {
-      const row = raw?.coordinate?.x ?? raw?.row ?? 0;
-      const col = raw?.coordinate?.y ?? raw?.col ?? 0;
+      const row = raw?.coordinate?.y ?? raw?.row ?? 0;
+      const col = raw?.coordinate?.x ?? raw?.col ?? 0;
       const result: ShotResult = {
         shooter: raw.shooter,
         target: raw.target,
