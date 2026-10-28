@@ -12,8 +12,12 @@ interface GameBoardProps {
   ships?: Ship[];
   isEnemy?: boolean;
   onCellClick?: (cell: string, key: string) => void;
+  onShipDrop?: (shipType: string, key: string) => void;
+  onShipRotate?: (shipType: string) => void;
+  onShipDragStart?: (shipType: string) => void;
   aimCell?: string | null;
   id: string;
+  isPlacement?: boolean;
 }
 
 function getCellClass(state: string, isEnemy: boolean): string {
@@ -115,8 +119,12 @@ export function GameBoard({
   ships = [],
   isEnemy = false,
   onCellClick,
+  onShipDrop,
+  onShipRotate,
+  onShipDragStart,
   aimCell,
   id,
+  isPlacement = false,
 }: GameBoardProps) {
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -132,10 +140,29 @@ export function GameBoard({
     [onCellClick, cells]
   );
 
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      if (!onShipDrop) return;
+      const btn = (e.target as Element).closest<HTMLButtonElement>("button[data-key]");
+      if (!btn) return;
+      const key = btn.dataset.key!;
+      onShipDrop(e.dataTransfer.getData("text/plain"), key);
+    },
+    [onShipDrop]
+  );
+
   return (
     <div
       id={id}
       onClick={handleClick}
+      onDragOver={isPlacement ? handleDragOver : undefined}
+      onDrop={isPlacement ? handleDrop : undefined}
       className={cn(
         "grid gap-1 p-3.5 pl-2.5 rounded-[20px] border relative overflow-hidden",
         isEnemy
@@ -211,6 +238,38 @@ export function GameBoard({
           }}
           dangerouslySetInnerHTML={{
             __html: shipSVG(ship.type, ship.size, ship.vertical ?? false),
+          }}
+        />
+      ))}
+
+      {/* Interactive ship hit layer during placement (draggable + rotate on right-click) */}
+      {isPlacement && ships.map((ship, idx) => (
+        <div
+          key={`interactive-${idx}`}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData("text/plain", ship.type);
+            e.dataTransfer.effectAllowed = "move";
+            onShipDragStart?.(ship.type);
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onShipRotate?.(ship.type);
+          }}
+          onDoubleClick={(e) => {
+            e.preventDefault();
+            onShipRotate?.(ship.type);
+          }}
+          title="Drag to move · Right-click or double-click to rotate"
+          className="z-[3] cursor-grab active:cursor-grabbing rounded-[4px] hover:ring-2 hover:ring-[var(--signal)] hover:ring-offset-1 hover:ring-offset-[var(--deck)] transition-all"
+          style={{
+            gridRow: ship.vertical
+              ? `${ship.row + 2} / span ${ship.size}`
+              : `${ship.row + 2}`,
+            gridColumn: ship.vertical
+              ? `${ship.col + 2}`
+              : `${ship.col + 2} / span ${ship.size}`,
+            pointerEvents: "auto",
           }}
         />
       ))}

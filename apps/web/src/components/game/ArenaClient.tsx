@@ -366,6 +366,126 @@ export function ArenaClient() {
 
   // ── Placement Actions ────────────────────────────────────────────────────────
 
+  // Handle ship dropped onto a grid cell (from palette or repositioning)
+  const handleShipDrop = (shipType: string, key: string) => {
+    if (phase !== "placement" || placementMode !== "ships") return;
+    const [r, c] = key.split(",").map(Number);
+    const def = SHIP_DEFS.find((d) => d.type === shipType)!;
+    const existingShip = playerShips.find((s) => s.type === shipType);
+    // Use existing ship's orientation, or current isVertical for new ships
+    const vertical = existingShip ? existingShip.vertical : isVertical;
+
+    // Check bounds
+    if (vertical && r + def.size > 10) {
+      setStatusMsg(`Cannot place ${def.name} vertically at ${key} (exceeds grid boundary).`);
+      return;
+    }
+    if (!vertical && c + def.size > 10) {
+      setStatusMsg(`Cannot place ${def.name} horizontally at ${key} (exceeds grid boundary).`);
+      return;
+    }
+
+    // Check collision with other ships
+    const occupied = new Set<string>();
+    playerShips
+      .filter((s) => s.type !== shipType)
+      .forEach((s) => s.cells.forEach((cell => occupied.add(cell))));
+
+    const cells: string[] = [];
+    for (let i = 0; i < def.size; i++) {
+      const cr = vertical ? r + i : r;
+      const cc = vertical ? c : c + i;
+      const ck = `${cr},${cc}`;
+      if (occupied.has(ck)) {
+        setStatusMsg(`Cannot place ${def.name} there (overlaps another ship).`);
+        return;
+      }
+      cells.push(ck);
+    }
+
+    // Remove mines that overlap
+    const minesToRemove = cells.filter((cell) => playerMines.includes(cell));
+    if (minesToRemove.length > 0) {
+      setPlayerMines((prev) => prev.filter((m) => !minesToRemove.includes(m)));
+    }
+
+    // Place or relocate ship
+    const updated = playerShips.filter((s) => s.type !== shipType);
+    updated.push({
+      type: def.type,
+      name: def.name,
+      size: def.size,
+      row: r,
+      col: c,
+      vertical,
+      cells,
+      hits: 0,
+    });
+    setPlayerShips(updated);
+    setSelectedShipType(def.type);
+    setStatusMsg(`Placed ${def.name}. Drag to reposition, right-click to rotate.`);
+
+    // Check readiness
+    const allPlaced = updated.length === 5;
+    setPlacementReady(allPlaced && playerMines.length - minesToRemove.length === 3);
+  };
+
+  // Rotate a placed ship (right-click or double-click)
+  const handleShipRotate = (shipType: string) => {
+    if (phase !== "placement" || placementMode !== "ships") return;
+    const ship = playerShips.find((s) => s.type === shipType);
+    if (!ship) return;
+
+    const newVertical = !ship.vertical;
+    // Check bounds with new orientation
+    if (newVertical && ship.row + ship.size > 10) {
+      setStatusMsg(`Cannot rotate ${ship.name} to vertical here (exceeds grid). Move it first.`);
+      return;
+    }
+    if (!newVertical && ship.col + ship.size > 10) {
+      setStatusMsg(`Cannot rotate ${ship.name} to horizontal here (exceeds grid). Move it first.`);
+      return;
+    }
+
+    // Recalculate cells
+    const cells: string[] = [];
+    for (let i = 0; i < ship.size; i++) {
+      const cr = newVertical ? ship.row + i : ship.row;
+      const cc = newVertical ? ship.col : ship.col + i;
+      cells.push(`${cr},${cc}`);
+    }
+
+    // Check collision with other ships
+    const occupied = new Set<string>();
+    playerShips
+      .filter((s) => s.type !== shipType)
+      .forEach((s) => s.cells.forEach((cell) => occupied.add(cell)));
+
+    for (const ck of cells) {
+      if (occupied.has(ck)) {
+        setStatusMsg(`Cannot rotate ${ship.name} here (overlaps another ship).`);
+        return;
+      }
+    }
+
+    // Remove mines that overlap
+    const minesToRemove = cells.filter((cell) => playerMines.includes(cell));
+    if (minesToRemove.length > 0) {
+      setPlayerMines((prev) => prev.filter((m) => !minesToRemove.includes(m)));
+    }
+
+    const updated = playerShips.map((s) =>
+      s.type === shipType ? { ...s, vertical: newVertical, cells } : s
+    );
+    setPlayerShips(updated);
+    setStatusMsg(`${ship.name} rotated to ${newVertical ? "vertical" : "horizontal"}.`);
+    setPlacementReady(updated.length === 5 && playerMines.length - minesToRemove.length === 3);
+  };
+
+  const handleShipDragStart = (shipType: string) => {
+    setSelectedShipType(shipType as ShipType);
+  };
+
   const handleRandomizePlacement = () => {
     const fresh = generateRandomFleet();
     setPlayerShips(fresh.ships);
@@ -1012,8 +1132,14 @@ export function ArenaClient() {
                       <button
                         key={def.type}
                         type="button"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/plain", def.type);
+                          e.dataTransfer.effectAllowed = "move";
+                          setSelectedShipType(def.type);
+                        }}
                         onClick={() => setSelectedShipType(def.type)}
-                        className="p-3 rounded-[12px] border flex flex-col items-center text-center transition-all hover:-translate-y-0.5"
+                        className="p-3 rounded-[12px] border flex flex-col items-center text-center transition-all hover:-translate-y-0.5 active:cursor-grabbing"
                         style={{
                           background: active
                             ? "rgba(53,214,192,0.15)"
@@ -1030,7 +1156,7 @@ export function ArenaClient() {
                         <span className="text-[20px] mb-1">{def.icon}</span>
                         <strong className="text-[13px] font-bold block">{def.name}</strong>
                         <span className="text-[11px] text-[var(--mist)] mt-0.5">
-                          {def.size} cells {placed ? "✓ Placed" : "· Ready"}
+                          {def.size} cells {placed ? "✓ Placed" : "· Drag to grid"}
                         </span>
                       </button>
                     );
@@ -1061,7 +1187,7 @@ export function ArenaClient() {
               <div className="flex items-center justify-between pt-2 border-t border-[var(--line)] flex-wrap gap-3">
                 <span className="text-[13px] text-[var(--mist)]">
                   {placementMode === "ships"
-                    ? "Click on the grid below to position the selected vessel."
+                    ? "Drag vessels from above onto the grid. Drag placed ships to reposition, right-click to rotate."
                     : "Click on empty grid cells to place mines (max 3). Click placed mines to remove."
                   }
                 </span>
@@ -1100,7 +1226,11 @@ export function ArenaClient() {
                 id="mine"
                 cells={myBoardCellsWithMines}
                 ships={playerBoardShips}
+                isPlacement={phase === "placement"}
                 onCellClick={phase === "placement" ? handlePlayerBoardClick : undefined}
+                onShipDrop={phase === "placement" ? handleShipDrop : undefined}
+                onShipRotate={phase === "placement" ? handleShipRotate : undefined}
+                onShipDragStart={phase === "placement" ? handleShipDragStart : undefined}
               />
             </div>
 
