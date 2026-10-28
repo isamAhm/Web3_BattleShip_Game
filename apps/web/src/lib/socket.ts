@@ -1,6 +1,10 @@
 import { io, Socket } from "socket.io-client";
 
-const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:4000";
+const SERVER_URL =
+  process.env.NEXT_PUBLIC_SERVER_URL ??
+  process.env.NEXT_PUBLIC_SOCKET_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:4000";
 
 let _socket: Socket | null = null;
 
@@ -58,8 +62,11 @@ export function connectSocket(token?: string): Socket {
   return socket;
 }
 
-export function waitForSocketConnection(socket: Socket, timeoutMs = 3500): Promise<boolean> {
-  if (socket.connected) return Promise.resolve(true);
+export function waitForSocketConnection(
+  socket: Socket,
+  timeoutMs = 3500
+): Promise<{ ok: boolean; error?: string }> {
+  if (socket.connected) return Promise.resolve({ ok: true });
 
   return new Promise((resolve) => {
     let timer: any;
@@ -68,20 +75,29 @@ export function waitForSocketConnection(socket: Socket, timeoutMs = 3500): Promi
       clearTimeout(timer);
       socket.off("connect", onConnect);
       socket.off("connect_error", onError);
-      resolve(true);
+      resolve({ ok: true });
     };
 
-    const onError = () => {
+    const onError = (err: any) => {
       clearTimeout(timer);
       socket.off("connect", onConnect);
       socket.off("connect_error", onError);
-      resolve(false);
+      const msg = err?.message || "Connection failed";
+      console.warn("[waitForSocketConnection] connect_error:", msg);
+      resolve({ ok: false, error: msg });
     };
 
     timer = setTimeout(() => {
       socket.off("connect", onConnect);
       socket.off("connect_error", onError);
-      resolve(socket.connected);
+      if (socket.connected) {
+        resolve({ ok: true });
+      } else {
+        resolve({
+          ok: false,
+          error: "Connection timed out. Battle server did not respond in time.",
+        });
+      }
     }, timeoutMs);
 
     socket.once("connect", onConnect);

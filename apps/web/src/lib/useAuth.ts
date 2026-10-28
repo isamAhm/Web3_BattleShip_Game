@@ -3,7 +3,11 @@
 import { useState, useCallback } from "react";
 import { connectSocket } from "./socket";
 
-const SERVER = process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:4000";
+const SERVER =
+  process.env.NEXT_PUBLIC_SERVER_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  process.env.NEXT_PUBLIC_SOCKET_URL ??
+  "http://localhost:4000";
 
 export interface AuthState {
   address: string | null;
@@ -110,6 +114,7 @@ export function useAuth() {
   const checkSession = useCallback(async () => {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null;
+      if (!token) return;
       const res = await fetch(`${SERVER}/api/auth/me`, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -126,6 +131,11 @@ export function useAuth() {
           setState({ address, loading: false, error: null });
           connectSocket(token || undefined);
         }
+      } else if (res.status === 401) {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("wba_session_token");
+        }
+        setState({ address: null, loading: false, error: null });
       }
     } catch (_) {}
   }, []);

@@ -154,11 +154,11 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     return new Promise<{ ok: boolean; roomCode?: string; error?: string }>(async (resolve) => {
       try {
         const s = connectSocket();
-        const connected = await waitForSocketConnection(s, 3500);
-        if (!connected) {
+        const conn = await waitForSocketConnection(s, 3500);
+        if (!conn.ok) {
           resolve({
             ok: false,
-            error: "Cannot connect to battle server (localhost:4000). Please check if server is running.",
+            error: conn.error || "Cannot connect to battle server (localhost:4000). Please check if server is running.",
           });
           return;
         }
@@ -191,11 +191,11 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     return new Promise<{ ok: boolean; matchId?: string; error?: string }>(async (resolve) => {
       try {
         const s = connectSocket();
-        const connected = await waitForSocketConnection(s, 3500);
-        if (!connected) {
+        const conn = await waitForSocketConnection(s, 3500);
+        if (!conn.ok) {
           resolve({
             ok: false,
-            error: "Cannot connect to battle server (localhost:4000). Please check if server is running.",
+            error: conn.error || "Cannot connect to battle server (localhost:4000). Please check if server is running.",
           });
           return;
         }

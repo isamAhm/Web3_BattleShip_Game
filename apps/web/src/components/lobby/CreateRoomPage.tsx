@@ -50,10 +50,20 @@ export function CreateRoomPage() {
     setErrorMsg("");
     setIsCreating(true);
     try {
-      if (!address) {
+      const token = typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null;
+      if (!address || !token) {
         await login(false);
       }
-      const res = await createRoom(roomCode);
+      let res = await createRoom(roomCode);
+      if (!res.ok) {
+        const errLower = (res.error || "").toLowerCase();
+        if (errLower.includes("unauthorized") || errLower.includes("session") || errLower.includes("connect")) {
+          console.log("[CreateRoomPage] Session stale or disconnected, acquiring fresh session...");
+          await login(false);
+          res = await createRoom(roomCode);
+        }
+      }
+
       if (!res.ok) {
         setErrorMsg(res.error || "Failed to create room");
         return;

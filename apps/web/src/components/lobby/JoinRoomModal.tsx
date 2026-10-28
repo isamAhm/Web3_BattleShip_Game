@@ -63,10 +63,20 @@ export function JoinRoomModal({ onClose }: { onClose: () => void }) {
     setJoining(true);
 
     try {
-      if (!address) {
+      const token = typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null;
+      if (!address || !token) {
         await login(false);
       }
-      const res = await joinRoom(code);
+      let res = await joinRoom(code);
+      if (!res.ok) {
+        const errLower = (res.error || "").toLowerCase();
+        if (errLower.includes("unauthorized") || errLower.includes("session") || errLower.includes("connect")) {
+          console.log("[JoinRoomModal] Session stale or disconnected, acquiring fresh session...");
+          await login(false);
+          res = await joinRoom(code);
+        }
+      }
+
       if (!res.ok) {
         setError(res.error || "Room not found or already in battle.");
         setJoining(false);
