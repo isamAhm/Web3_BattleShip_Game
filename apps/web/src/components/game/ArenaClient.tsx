@@ -203,8 +203,8 @@ export function ArenaClient() {
     onShotResult: (result) => {
       const key = `${result.row},${result.col}`;
       const isMe = result.shooter && address ? result.shooter.toLowerCase() === address.toLowerCase() : false;
-      const colLetter = LETTERS[result.col] ?? "A";
-      const targetLabel = `${colLetter}${result.row + 1}`;
+      const rowLetter = LETTERS[result.row] ?? "A";
+      const targetLabel = `${rowLetter}${result.col + 1}`;
 
       if (isMe) {
         setFoeCells((prev) => ({ ...prev, [key]: result.outcome as any }));
@@ -499,14 +499,14 @@ export function ArenaClient() {
 
     if (matchIdParam) {
       const engineShips = playerShips.map((s) => ({
-        x: s.row,
-        y: s.col,
+        x: s.col,
+        y: s.row,
         length: s.size,
         orientation: s.vertical ? ("V" as const) : ("H" as const),
       }));
       const engineMines = playerMines.map((m) => {
         const [r, c] = m.split(",").map(Number);
-        return { x: r, y: c };
+        return { x: c, y: r };
       });
       const salt = generateSalt();
       const commitment = commitPlacement({ ships: engineShips, mines: engineMines }, salt);
