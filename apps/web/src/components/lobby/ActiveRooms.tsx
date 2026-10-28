@@ -1,61 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-
-const ROOMS = [
-  {
-    id: "R-4421",
-    name: "Admiral Vega's Fleet",
-    host: "Admiral Vega",
-    mode: "Classic",
-    players: "1/2",
-    mines: 3,
-    status: "waiting",
-    spectators: 4,
-  },
-  {
-    id: "R-3817",
-    name: "Rook's Blitz Room",
-    host: "Rook",
-    mode: "Blitz",
-    players: "1/2",
-    mines: 0,
-    status: "waiting",
-    spectators: 1,
-  },
-  {
-    id: "R-2290",
-    name: "Open Classic",
-    host: "SilverHull",
-    mode: "Classic",
-    players: "2/2",
-    mines: 5,
-    status: "in-progress",
-    spectators: 8,
-  },
-  {
-    id: "R-1103",
-    name: "Phantom vs Anyone",
-    host: "Phantom",
-    mode: "Classic",
-    players: "1/2",
-    mines: 3,
-    status: "waiting",
-    spectators: 0,
-  },
-  {
-    id: "R-0988",
-    name: "Corsair Night Match",
-    host: "Corsair",
-    mode: "Blitz",
-    players: "2/2",
-    mines: 2,
-    status: "in-progress",
-    spectators: 3,
-  },
-];
+import { api } from "@/lib/api";
 
 const MODE_COLORS: Record<string, string> = {
   Classic: "var(--signal)",
@@ -64,42 +12,129 @@ const MODE_COLORS: Record<string, string> = {
   Private: "var(--mist)",
 };
 
-export function ActiveRooms() {
-  const [filter, setFilter] = useState<"all" | "waiting" | "in-progress">("all");
+export interface ActiveRoomsProps {
+  onJoinRoom?: (roomCode: string) => void;
+}
 
-  const filtered = ROOMS.filter(
+export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
+  const [filter, setFilter] = useState<"all" | "waiting" | "in-progress">("all");
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+
+  const fetchRooms = useCallback(async (manual = false) => {
+    if (manual) setIsRefreshing(true);
+    try {
+      const data = await api.activeRoomsAndMatches();
+      const waiting = (data.rooms || []).map((r: any) => ({
+        id: r.id || r.roomCode,
+        roomCode: r.roomCode,
+        name: r.name || `Room ${r.roomCode}`,
+        host: r.host || "Host Commander",
+        mode: r.mode || "Classic",
+        players: r.players || "1/2",
+        mines: r.mines ?? 3,
+        status: "waiting",
+        spectators: r.spectators ?? 0,
+      }));
+
+      const active = (data.matches || []).map((m: any) => ({
+        id: m.id || m.matchId,
+        matchId: m.matchId,
+        roomCode: m.roomCode,
+        name: m.name || `Match ${m.matchId.slice(0, 8)}`,
+        host: m.host || "Commander Alpha",
+        opponent: m.opponent,
+        mode: m.mode || "Classic",
+        players: m.players || "2/2",
+        mines: m.mines ?? 3,
+        status: "in-progress",
+        spectators: m.spectators ?? 0,
+      }));
+
+      setRooms([...waiting, ...active]);
+      setLastRefreshed(new Date());
+    } catch (err) {
+      console.warn("[ActiveRooms] Failed to load active rooms:", err);
+    } finally {
+      setIsLoading(false);
+      if (manual) setIsRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRooms();
+    const interval = setInterval(() => {
+      fetchRooms();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchRooms]);
+
+  const filtered = rooms.filter(
     (r) => filter === "all" || r.status === filter
   );
 
   return (
-    <section>
+    <section className="mt-8">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <h2 className="font-display font-bold text-[20px] tracking-tight">
-          Active Rooms
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="font-display font-bold text-[20px] tracking-tight">
+            Active Rooms & Battles
+          </h2>
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold bg-[rgba(53,214,192,0.1)] text-[var(--signal)] border border-[rgba(53,214,192,0.25)]">
+            <span className="w-2 h-2 rounded-full bg-[var(--signal)] animate-pulse" />
+            LIVE FEED
+          </span>
+        </div>
 
-        {/* Filter tabs */}
-        <div
-          className="flex gap-1 p-1 rounded-[10px]"
-          style={{ background: "var(--abyss)" }}
-          role="group"
-          aria-label="Filter rooms"
-        >
-          {(["all", "waiting", "in-progress"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setFilter(f)}
-              className={cn(
-                "px-3 py-1.5 rounded-[7px] text-[13px] font-medium capitalize transition-colors",
-                filter === f
-                  ? "bg-[var(--hull)] text-[var(--foam)]"
-                  : "text-[var(--mist)] hover:text-[var(--foam)]"
-              )}
+        <div className="flex items-center gap-3">
+          {/* Refresh button */}
+          <button
+            type="button"
+            onClick={() => fetchRooms(true)}
+            disabled={isRefreshing}
+            className="p-1.5 rounded-[8px] text-[var(--mist)] hover:text-[var(--foam)] transition-colors border border-[var(--line)] hover:bg-[var(--hull)] text-xs flex items-center gap-1"
+            title="Refresh active rooms"
+          >
+            <svg
+              className={cn("w-3.5 h-3.5", isRefreshing && "animate-spin text-[var(--signal)]")}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
             >
-              {f === "in-progress" ? "In Progress" : f.charAt(0).toUpperCase() + f.slice(1)}
-            </button>
-          ))}
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+              <path d="M16 21h5v-5" />
+            </svg>
+            <span className="hidden sm:inline">Sync</span>
+          </button>
+
+          {/* Filter tabs */}
+          <div
+            className="flex gap-1 p-1 rounded-[10px]"
+            style={{ background: "var(--abyss)" }}
+            role="group"
+            aria-label="Filter rooms"
+          >
+            {(["all", "waiting", "in-progress"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "px-3 py-1.5 rounded-[7px] text-[13px] font-medium capitalize transition-colors",
+                  filter === f
+                    ? "bg-[var(--hull)] text-[var(--foam)]"
+                    : "text-[var(--mist)] hover:text-[var(--foam)]"
+                )}
+              >
+                {f === "in-progress" ? "In Progress" : f.charAt(0).toUpperCase() + f.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -116,7 +151,7 @@ export function ActiveRooms() {
             borderBottom: "1px solid var(--line)",
           }}
         >
-          <span>Room</span>
+          <span>Room / Battle</span>
           <span>Mode</span>
           <span>Players</span>
           <span>Mines</span>
@@ -124,111 +159,150 @@ export function ActiveRooms() {
           <span className="text-right">Action</span>
         </div>
 
-        {filtered.length === 0 && (
+        {isLoading ? (
           <div
-            className="text-center py-10 text-[var(--mist)]"
+            className="text-center py-12 text-[var(--mist)] font-mono text-[13px] animate-pulse"
             style={{ background: "rgba(6,20,26,0.4)" }}
           >
-            No rooms match this filter.
+            Scanning tactical frequencies…
           </div>
-        )}
-
-        {filtered.map((room, i) => (
+        ) : filtered.length === 0 ? (
           <div
-            key={room.id}
-            className="grid gap-4 px-5 py-4 items-center transition-colors hover:bg-[rgba(53,214,192,0.03)]"
-            style={{
-              gridTemplateColumns: "1fr 90px 80px 70px 100px 110px",
-              borderTop: i === 0 ? undefined : "1px solid var(--line)",
-              background:
-                i % 2 === 0
-                  ? "rgba(12,34,43,0.5)"
-                  : "rgba(6,20,26,0.3)",
-            }}
+            className="text-center py-12 px-4"
+            style={{ background: "rgba(6,20,26,0.4)" }}
           >
-            {/* Name + host */}
-            <div className="min-w-0">
-              <div className="font-medium text-[14px] truncate">{room.name}</div>
-              <div className="text-[var(--mist)] text-[12px] mt-0.5">
-                {room.host}
-              </div>
-            </div>
-
-            {/* Mode */}
-            <span
-              className="text-[12px] font-semibold px-2.5 py-1 rounded-full w-fit"
+            <p className="text-[14px] text-[var(--mist)]">
+              {rooms.length === 0
+                ? "No active rooms or ongoing battles detected."
+                : "No rooms match the selected filter."}
+            </p>
+            <p className="text-[12px] text-[var(--mist)] mt-1 opacity-75">
+              Create a room or queue for Quick Match above to launch a combat session.
+            </p>
+          </div>
+        ) : (
+          filtered.map((room, i) => (
+            <div
+              key={room.id}
+              className="grid gap-4 px-5 py-4 items-center transition-colors hover:bg-[rgba(53,214,192,0.03)]"
               style={{
-                background: `color-mix(in srgb, ${MODE_COLORS[room.mode]} 12%, transparent)`,
-                color: MODE_COLORS[room.mode],
+                gridTemplateColumns: "1fr 90px 80px 70px 100px 110px",
+                borderTop: i === 0 ? undefined : "1px solid var(--line)",
+                background:
+                  i % 2 === 0
+                    ? "rgba(12,34,43,0.5)"
+                    : "rgba(6,20,26,0.3)",
               }}
             >
-              {room.mode}
-            </span>
+              {/* Name + host */}
+              <div className="min-w-0">
+                <div className="font-medium text-[14px] truncate flex items-center gap-2">
+                  <span>{room.name}</span>
+                  {room.roomCode && (
+                    <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-[rgba(53,214,192,0.1)] text-[var(--signal)]">
+                      {room.roomCode}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[var(--mist)] text-[12px] mt-0.5 truncate">
+                  Host: {room.host} {room.opponent ? `vs ${room.opponent}` : ""}
+                </div>
+              </div>
 
-            {/* Players */}
-            <div className="flex items-center gap-1.5 text-[13px]">
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
-                <circle cx="5" cy="4" r="2" stroke="var(--mist)" strokeWidth="1.2" />
-                <path d="M1 11c0-2 1.8-3.5 4-3.5s4 1.5 4 3.5" stroke="var(--mist)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-              </svg>
-              <span style={{ color: room.players === "2/2" ? "var(--mist)" : "var(--foam)" }}>
-                {room.players}
+              {/* Mode */}
+              <span
+                className="text-[12px] font-semibold px-2.5 py-1 rounded-full w-fit"
+                style={{
+                  background: `color-mix(in srgb, ${MODE_COLORS[room.mode] || "var(--signal)"} 12%, transparent)`,
+                  color: MODE_COLORS[room.mode] || "var(--signal)",
+                }}
+              >
+                {room.mode}
               </span>
-            </div>
 
-            {/* Mines */}
-            <span className="text-[13px] text-[var(--mist)]">
-              {room.mines > 0 ? (
-                <span className="flex items-center gap-1">
-                  <span
-                    className="w-2 h-2 rounded-sm rotate-45 inline-block"
-                    style={{ background: "var(--brass)" }}
-                    aria-hidden="true"
-                  />
-                  ×{room.mines}
+              {/* Players */}
+              <div className="flex items-center gap-1.5 text-[13px]">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                  <circle cx="5" cy="4" r="2" stroke="var(--mist)" strokeWidth="1.2" />
+                  <path d="M1 11c0-2 1.8-3.5 4-3.5s4 1.5 4 3.5" stroke="var(--mist)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+                </svg>
+                <span style={{ color: room.players === "2/2" ? "var(--mist)" : "var(--foam)" }}>
+                  {room.players}
                 </span>
-              ) : (
-                <span className="opacity-40">—</span>
-              )}
-            </span>
+              </div>
 
-            {/* Spectators */}
-            <span className="text-[13px] text-[var(--mist)]">
-              {room.spectators > 0 ? `👁 ${room.spectators}` : "—"}
-            </span>
+              {/* Mines */}
+              <span className="text-[13px] text-[var(--mist)]">
+                {room.mines > 0 ? (
+                  <span className="flex items-center gap-1">
+                    <span
+                      className="w-2 h-2 rounded-sm rotate-45 inline-block"
+                      style={{ background: "var(--brass)" }}
+                      aria-hidden="true"
+                    />
+                    ×{room.mines}
+                  </span>
+                ) : (
+                  <span className="opacity-40">—</span>
+                )}
+              </span>
 
-            {/* Action */}
-            <div className="flex justify-end">
-              {room.status === "waiting" ? (
-                <Link
-                  href="/arena"
-                  className="px-4 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
-                  style={{
-                    background: "var(--accent-cta)",
-                    color: "var(--cta-text)",
-                    boxShadow: "0 4px 16px -4px var(--cta-shadow)",
-                  }}
-                >
-                  Join
-                </Link>
-              ) : (
-                <Link
-                  href="/arena"
-                  className="px-4 py-2 rounded-[10px] text-[13px] font-semibold border transition-all hover:bg-[var(--hull)]"
-                  style={{ borderColor: "var(--line)", color: "var(--mist)" }}
-                >
-                  Watch
-                </Link>
-              )}
+              {/* Spectators */}
+              <span className="text-[13px] text-[var(--mist)]">
+                {room.spectators > 0 ? `👁 ${room.spectators}` : "—"}
+              </span>
+
+              {/* Action */}
+              <div className="flex justify-end">
+                {room.status === "waiting" ? (
+                  onJoinRoom && room.roomCode ? (
+                    <button
+                      type="button"
+                      onClick={() => onJoinRoom(room.roomCode)}
+                      className="px-4 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
+                      style={{
+                        background: "var(--accent-cta)",
+                        color: "var(--cta-text)",
+                        boxShadow: "0 4px 16px -4px var(--cta-shadow)",
+                      }}
+                    >
+                      Join
+                    </button>
+                  ) : (
+                    <Link
+                      href={room.roomCode ? `/play?join=${room.roomCode}` : "/arena"}
+                      className="px-4 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
+                      style={{
+                        background: "var(--accent-cta)",
+                        color: "var(--cta-text)",
+                        boxShadow: "0 4px 16px -4px var(--cta-shadow)",
+                      }}
+                    >
+                      Join
+                    </Link>
+                  )
+                ) : (
+                  <Link
+                    href={`/arena?match=${room.matchId || room.id}&spectate=true`}
+                    className="px-4 py-2 rounded-[10px] text-[13px] font-semibold border transition-all hover:bg-[var(--hull)] text-[var(--mist)] hover:text-[var(--foam)] flex items-center gap-1.5"
+                    style={{ borderColor: "var(--line)" }}
+                  >
+                    <span>👁️</span> Watch
+                  </Link>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       {/* Refresh hint */}
-      <p className="text-[var(--mist)] text-[12px] mt-3 text-right">
-        Rooms refresh every 10 seconds · {ROOMS.length} total
-      </p>
+      <div className="flex items-center justify-between text-[var(--mist)] text-[12px] mt-3">
+        <span>Auto-sync active (every 5s)</span>
+        <span>
+          {rooms.length} {rooms.length === 1 ? "room" : "rooms"} active · Updated {lastRefreshed.toLocaleTimeString()}
+        </span>
+      </div>
     </section>
   );
 }

@@ -130,6 +130,10 @@ export class MatchmakingService {
     return this.privateRooms.get(roomCode.toUpperCase()) ?? null;
   }
 
+  public listPrivateRooms(): PrivateRoom[] {
+    return Array.from(this.privateRooms.values()).filter((r) => !r.guest);
+  }
+
   public removePrivateRoom(roomCode: string): void {
     this.privateRooms.delete(roomCode.toUpperCase());
   }

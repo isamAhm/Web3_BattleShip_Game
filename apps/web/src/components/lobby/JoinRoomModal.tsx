@@ -5,14 +5,40 @@ import { useRouter } from "next/navigation";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
 
-export function JoinRoomModal({ onClose }: { onClose: () => void }) {
+export function JoinRoomModal({
+  onClose,
+  initialCode = "",
+}: {
+  onClose: () => void;
+  initialCode?: string;
+}) {
   const router = useRouter();
   const { address, login } = useAuthCtx();
-  const [slots, setSlots]     = useState(["","","","","",""]);
+  const [slots, setSlots] = useState(() => {
+    const chars = (initialCode || "")
+      .toUpperCase()
+      .replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 6)
+      .split("");
+    while (chars.length < 6) chars.push("");
+    return chars;
+  });
   const [error, setError]     = useState("");
   const [joining, setJoining] = useState(false);
   const inputRefs             = useRef<(HTMLInputElement | null)[]>([]);
   const code = slots.join("");
+
+  useEffect(() => {
+    if (initialCode) {
+      const chars = initialCode
+        .toUpperCase()
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 6)
+        .split("");
+      while (chars.length < 6) chars.push("");
+      setSlots(chars);
+    }
+  }, [initialCode]);
 
   const { joinRoom } = useGameSocket({
     onMatchFound: (matchId, opponent) => {

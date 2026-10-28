@@ -32,6 +32,44 @@ tournamentsRouter.get('/:id', async (req: Request, res: Response, next: NextFunc
 });
 
 tournamentsRouter.post(
+  '/:id/register',
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userAddress = req.user!.address;
+      const tournament = await tournamentRepo.findById(req.params.id);
+      if (!tournament) {
+        res.status(404).json({ success: false, error: { message: 'Tournament not found' } });
+        return;
+      }
+      const standings = tournament.standings || [];
+      const alreadyRegistered = standings.some(
+        (s) => s.address.toLowerCase() === userAddress.toLowerCase(),
+      );
+      if (!alreadyRegistered) {
+        standings.push({
+          address: userAddress,
+          points: 100,
+          wins: 0,
+          rank: standings.length + 1,
+        });
+        await tournamentRepo.updateStandings(req.params.id, standings);
+      }
+      res.json({
+        success: true,
+        data: {
+          registered: true,
+          tournamentId: req.params.id,
+          standings,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+tournamentsRouter.post(
   '/',
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {

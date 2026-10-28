@@ -1,11 +1,54 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { matchRepo } from '../../repositories/matchRepo.js';
 import { matchManager } from '../../services/matchManager.js';
+import { matchmakingService } from '../../services/matchmaking.js';
 import { revealPayloadSchema } from '@wba/shared';
 import { replayScores } from '@wba/engine';
 import { requireAuth } from '../../middleware/auth.js';
 
 export const matchesRouter = Router();
+
+matchesRouter.get('/active', async (req: Request, res: Response) => {
+  try {
+    const waitingRooms = matchmakingService.listPrivateRooms().map((r) => ({
+      id: r.code,
+      roomCode: r.code,
+      name: `${r.host.slice(0, 6)}…'s Fleet`,
+      host: `${r.host.slice(0, 6)}…${r.host.slice(-4)}`,
+      mode: 'Classic',
+      players: '1/2',
+      mines: 3,
+      status: 'waiting',
+      spectators: 0,
+      createdAt: r.createdAt,
+    }));
+
+    const activeSessions = matchManager.listActiveSessions().map((s) => ({
+      id: s.matchId,
+      matchId: s.matchId,
+      roomCode: s.roomCode,
+      name: `${s.players[0].slice(0, 6)} vs ${s.players[1].slice(0, 6)}`,
+      host: `${s.players[0].slice(0, 6)}…${s.players[0].slice(-4)}`,
+      opponent: `${s.players[1].slice(0, 6)}…${s.players[1].slice(-4)}`,
+      mode: 'Classic',
+      players: '2/2',
+      mines: 3,
+      status: 'in-progress',
+      spectators: s.spectatorsCount,
+      phase: s.phase,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        rooms: waitingRooms,
+        matches: activeSessions,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 matchesRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

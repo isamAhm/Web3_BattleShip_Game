@@ -34,6 +34,7 @@ export interface GameSocketCallbacks {
   onMatchEnd?:     (payload: MatchEndPayload) => void;
   onMatchVerified?:(resultHash: string) => void;
   onRoomCreated?:  (roomCode: string) => void;
+  onSpectateView?: (view: any) => void;
   onChatMessage?:  (sender: string, text: string, ts: number) => void;
   onInvite?:       (from: string) => void;
   onError?:        (msg: string) => void;
@@ -114,8 +115,16 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       cbRef.current.onRoomCreated?.(code);
     });
 
-    socket.on("chat:message", ({ sender, text, ts }) =>
-      cbRef.current.onChatMessage?.(sender, text, ts));
+    socket.on("spectate:view", (view: any) => {
+      cbRef.current.onSpectateView?.(view);
+    });
+
+    socket.on("chat:message", (data: any) => {
+      const sender = data?.username || data?.sender || "Comms";
+      const text = data?.text || "";
+      const ts = data?.timestamp || Date.now();
+      cbRef.current.onChatMessage?.(sender, text, ts);
+    });
 
     socket.on("invite:received", ({ from }) =>
       cbRef.current.onInvite?.(from));
@@ -128,6 +137,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       socket.off("match:start");
       socket.off("match:restore");
       socket.off("match:rejoin");
+      socket.off("spectate:view");
       socket.off("shot:result");
       socket.off("turn:timer");
       socket.off("turn:timeout");

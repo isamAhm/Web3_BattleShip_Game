@@ -80,6 +80,10 @@ export const api = {
     };
   },
 
+  // Active rooms & matches
+  activeRoomsAndMatches: () =>
+    apiFetch<{ rooms: any[]; matches: any[] }>("/api/matches/active"),
+
   // Rewards Ledger
   rewards: {
     getMyLedger: () =>
@@ -92,6 +96,8 @@ export const api = {
       apiFetch<any[]>(`/api/tournaments${status ? `?status=${status}` : ""}`),
     get: (id: string) =>
       apiFetch<any>(`/api/tournaments/${id}`),
+    register: (id: string) =>
+      apiFetch<any>(`/api/tournaments/${id}/register`, { method: "POST" }),
     create: (data: any) =>
       apiFetch<any>("/api/tournaments", { method: "POST", body: JSON.stringify(data) }),
   },

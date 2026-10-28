@@ -421,6 +421,34 @@ export class MatchManager {
     this.roomToMatch.clear();
     this.playerToMatch.clear();
   }
+
+  public listActiveSessions(): Array<{
+    matchId: string;
+    roomCode: string;
+    players: string[];
+    phase: string;
+    spectatorsCount: number;
+  }> {
+    const list: Array<{
+      matchId: string;
+      roomCode: string;
+      players: string[];
+      phase: string;
+      spectatorsCount: number;
+    }> = [];
+    this.sessions.forEach((s) => {
+      if (s.matchState.phase !== 'finished') {
+        list.push({
+          matchId: s.matchId,
+          roomCode: s.roomCode,
+          players: [s.matchState.players[0].address, s.matchState.players[1].address],
+          phase: s.matchState.phase,
+          spectatorsCount: s.spectators.size,
+        });
+      }
+    });
+    return list;
+  }
 }
 
 export const matchManager = new MatchManager();

@@ -113,6 +113,7 @@ export function ArenaClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const matchIdParam = searchParams.get("match");
+  const isSpectator = searchParams.get("spectate") === "true";
   const { address } = useAuthCtx();
 
   // Phase: placement -> battle -> ended
@@ -185,7 +186,7 @@ export function ArenaClient() {
   const revealStateRef = useRef<{ salt: `0x${string}`; ships: any[]; mines: any[] } | null>(null);
 
   // Live Socket Hooks (for Multiplayer Match)
-  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat } = useGameSocket({
+  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, spectate } = useGameSocket({
     onMatchFound: (matchId, opponent) => {
       setInQueue(false);
       setOpponentName(`Commander ${opponent.slice(0, 6)}`);
@@ -278,11 +279,59 @@ export function ArenaClient() {
         });
       }
     },
+    onSpectateView: (view: any) => {
+      setPhase("battle");
+      setIsMyTurn(false);
+      const players = view?.players || [];
+      const p1 = players[0]?.address || "Host";
+      const p2 = players[1]?.address || "Guest";
+      setOpponentName(`Commander ${p2.slice(0, 6)}`);
+      setOpponentAddr(p2);
+      setStatusMsg(`👁️ Live Match Observation: ${p1.slice(0, 6)}… vs ${p2.slice(0, 6)}…`);
+      if (Array.isArray(view?.shots)) {
+        const myCells: BoardCells = {};
+        const fCells: BoardCells = {};
+        const logs: ShotLogEntry[] = [];
+        view.shots.forEach((s: any) => {
+          const row = s.y;
+          const col = s.x;
+          const k = `${row},${col}`;
+          const isP0 = s.player === 0;
+          const lbl = `${LETTERS[row] ?? "A"}${col + 1}`;
+          if (isP0) {
+            fCells[k] = s.outcome;
+            logs.unshift({ cell: lbl, actor: "you", result: s.outcome });
+          } else {
+            myCells[k] = s.outcome;
+            logs.unshift({ cell: lbl, actor: "opponent", result: s.outcome });
+          }
+        });
+        setMyBoardCells(myCells);
+        setFoeCells(fCells);
+        setShotLog(logs);
+      }
+    },
     onChatMessage: (sender, text) => {
-      setChatMessages((prev) => [...prev, { sender: sender.slice(0, 8) + "…", text }]);
+      const myAddr = address?.toLowerCase();
+      const displaySender =
+        sender.toLowerCase() === myAddr
+          ? "You"
+          : sender.startsWith("0x")
+            ? `Cmdr ${sender.slice(0, 6)}`
+            : sender;
+      setChatMessages((prev) => [...prev, { sender: displaySender, text }]);
     },
     onError: (msg) => setStatusMsg(`Error: ${msg}`),
   });
+  useEffect(() => {
+    if (isSpectator && matchIdParam) {
+      setPhase("battle");
+      setIsMyTurn(false);
+      setStatusMsg("👁️ Spectator Mode active. Connecting to combat network…");
+      spectate(matchIdParam);
+    }
+  }, [isSpectator, matchIdParam, spectate]);
+
 
   // Calculate live player fleet for PlayerPanel
   const playerFleet: FleetShip[] = useMemo(() => {
@@ -824,10 +873,50 @@ export function ArenaClient() {
     setAimLabel(`${LETTERS[r]}${c + 1}`);
   };
 
+  const handleResetSoloGame = () => {
+    if (matchIdParam) {
+      router.push("/arena");
+    }
+    const fresh = generateRandomFleet();
+    setPlayerShips(fresh.ships);
+    setPlayerMines(fresh.mines);
+    setMyBoardCells({});
+    setFoeCells({});
+    setShotLog([]);
+    setPlayerScore(0);
+    setEnemyScore(0);
+    setPlayerStreak(0);
+    setEnemyStreak(0);
+    setAiFiredKeys(new Set());
+    setAiRecentHits([]);
+    setBannerAlert(null);
+    setAimCell(null);
+    setAimLabel("Pick a cell");
+    setIsMyTurn(true);
+    setTimerSecs(30);
+    setPhase("placement");
+    setPlacementReady(true);
+    setStatusMsg("Place your fleet: Click a cell to position, or hit Randomize.");
+  };
+
   const handleSendChat = () => {
     if (!chatInput.trim()) return;
-    setChatMessages((prev) => [...prev, { sender: "You", text: chatInput.trim() }]);
+    const text = chatInput.trim();
     setChatInput("");
+    if (matchIdParam) {
+      sendChat(matchIdParam, text);
+    } else {
+      setChatMessages((prev) => [...prev, { sender: "You", text }]);
+      setTimeout(() => {
+        const responses = [
+          "AI Tactical Unit: Target acquired. Calculating retaliation coordinates.",
+          "AI Tactical Unit: Hull integrity holding. Torpedoes primed.",
+          "AI Tactical Unit: Sonar ping detected. Preparing counterstrike.",
+        ];
+        const reply = responses[Math.floor(Math.random() * responses.length)];
+        setChatMessages((prev) => [...prev, { sender: "AI Tactical Bot", text: reply }]);
+      }, 900);
+    }
   };
 
   const pct = `${Math.round((timerSecs / 30) * 100)}%`;
@@ -871,17 +960,24 @@ export function ArenaClient() {
             >
               <span>{bannerAlert.text}</span>
               {phase === "ended" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleRandomizePlacement();
-                    setPhase("placement");
-                  }}
-                  className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105"
-                  style={{ background: "var(--signal)", color: "var(--abyss)" }}
-                >
-                  Play Again
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetSoloGame}
+                    className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105"
+                    style={{ background: "var(--signal)", color: "var(--abyss)" }}
+                  >
+                    {matchIdParam ? "Practice vs AI (Solo)" : "Play Again"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/play")}
+                    className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105 border border-[var(--line)]"
+                    style={{ background: "rgba(19,48,59,.8)", color: "var(--foam)" }}
+                  >
+                    Lobby / New Match →
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -904,9 +1000,16 @@ export function ArenaClient() {
           {/* Header Bar */}
           <div className="flex items-center gap-4 mb-5 flex-wrap">
             <div>
-              <h1 className="font-display font-extrabold text-[28px] tracking-tight">
-                {phase === "placement" ? "Fleet Deployment" : "Naval Battle Arena"}
-              </h1>
+              <div className="flex items-center gap-3">
+                <h1 className="font-display font-extrabold text-[28px] tracking-tight">
+                  {phase === "placement" ? "Fleet Deployment" : "Naval Battle Arena"}
+                </h1>
+                {isSpectator && (
+                  <span className="px-3 py-1 rounded-full text-[12px] font-mono font-bold bg-[rgba(235,181,74,0.15)] text-[var(--brass)] border border-[var(--brass)] flex items-center gap-1.5">
+                    👁️ SPECTATOR MODE
+                  </span>
+                )}
+              </div>
               <p className="text-[var(--mist)] text-[14px] mt-0.5">
                 {phase === "placement"
                   ? "Position your 5 vessels and tactical mines before engaging the hostile fleet."
@@ -915,7 +1018,7 @@ export function ArenaClient() {
             </div>
 
             {/* Timer */}
-            {phase === "battle" && (
+            {phase === "battle" && !isSpectator && (
               <div
                 className="ml-auto flex items-center gap-3 px-4 py-2 rounded-full border"
                 style={{ background: "var(--deck)", borderColor: "var(--line)" }}
@@ -1117,7 +1220,7 @@ export function ArenaClient() {
                 cells={foeCells}
                 ships={enemyBoardShips}
                 isEnemy
-                onCellClick={phase === "battle" && isMyTurn ? handleEnemyCellClick : undefined}
+                onCellClick={phase === "battle" && isMyTurn && !isSpectator ? handleEnemyCellClick : undefined}
                 aimCell={aimCell}
               />
             </div>
