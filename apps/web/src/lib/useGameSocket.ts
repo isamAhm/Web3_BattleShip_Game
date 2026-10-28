@@ -232,7 +232,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
 
   const fireShot = useCallback(
     (matchId: string, row: number, col: number) => {
-      getSocket().emit("shot:fire", { matchId, coordinate: { x: row, y: col } });
+      getSocket().emit("shot:fire", { matchId, coordinate: { x: col, y: row } });
     }, []
   );
 
