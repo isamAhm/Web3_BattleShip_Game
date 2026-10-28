@@ -170,7 +170,7 @@ export default function TournamentsPage() {
                     >
                       {isOpen ? "🟢 Registration Open" : "🏁 Concluded"}
                     </span>
-                    <span className="text-[11px] font-mono text-[var(--mist)]">
+                    <span className="text-[11px] font-mono text-[var(--mist)]" suppressHydrationWarning>
                       {new Date(t.startTime).toLocaleDateString()}
                     </span>
                   </div>

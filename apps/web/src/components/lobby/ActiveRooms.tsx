@@ -21,7 +21,12 @@ export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
   const [rooms, setRooms] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [mounted, setMounted] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const fetchRooms = useCallback(async (manual = false) => {
     if (manual) setIsRefreshing(true);
@@ -296,8 +301,9 @@ export function ActiveRooms({ onJoinRoom }: ActiveRoomsProps) {
       {/* Refresh hint */}
       <div className="flex items-center justify-between text-[var(--mist)] text-[12px] mt-3">
         <span>Auto-sync active (every 5s)</span>
-        <span>
-          {rooms.length} {rooms.length === 1 ? "room" : "rooms"} active · Updated {lastRefreshed.toLocaleTimeString()}
+        <span suppressHydrationWarning>
+          {rooms.length} {rooms.length === 1 ? "room" : "rooms"} active
+          {mounted && lastRefreshed ? ` · Updated ${lastRefreshed.toLocaleTimeString()}` : ""}
         </span>
       </div>
     </section>
