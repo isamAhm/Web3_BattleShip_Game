@@ -12,6 +12,7 @@ import { BadgesPanel } from "./BadgesPanel";
 import { MatchRecord } from "./MatchRecord";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
+import { api } from "@/lib/api";
 import type {
   BoardCells,
   Ship,
@@ -113,6 +114,9 @@ export function ArenaClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const matchIdParam = searchParams.get("match");
+  const isSpectator = searchParams.get("spectate") === "true";
+  const isTournament = searchParams.get("mode") === "tournament" || Boolean(searchParams.get("tournamentId"));
+  const tournamentId = searchParams.get("tournamentId") || "tourn_season_1_championship";
   const { address } = useAuthCtx();
 
   // Phase: placement -> battle -> ended
@@ -125,6 +129,7 @@ export function ArenaClient() {
   const [isVertical, setIsVertical] = useState(false);
   const [placementReady, setPlacementReady] = useState(false);
   const [placementMode, setPlacementMode] = useState<"ships" | "mines">("ships");
+  const [showForfeitConfirm, setShowForfeitConfirm] = useState(false);
 
   // Hidden Enemy Fleet (AI or Opponent)
   const [enemyShips, setEnemyShips] = useState<PlacedShip[]>(() => generateRandomFleet().ships);
@@ -180,12 +185,12 @@ export function ArenaClient() {
     return () => clearInterval(t);
   }, [phase, isMyTurn]);
 
-  const [opponentName, setOpponentName] = useState("AI Tactical Bot");
+  const [opponentName, setOpponentName] = useState(() => isTournament ? "Grand Admiral (Seed #1)" : "AI Tactical Bot");
   const [opponentAddr, setOpponentAddr] = useState("0x90F8…c9C1");
   const revealStateRef = useRef<{ salt: `0x${string}`; ships: any[]; mines: any[] } | null>(null);
 
   // Live Socket Hooks (for Multiplayer Match)
-  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat } = useGameSocket({
+  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, spectate, forfeitMatch } = useGameSocket({
     onMatchFound: (matchId, opponent) => {
       setInQueue(false);
       setOpponentName(`Commander ${opponent.slice(0, 6)}`);
@@ -203,8 +208,8 @@ export function ArenaClient() {
     onShotResult: (result) => {
       const key = `${result.row},${result.col}`;
       const isMe = result.shooter && address ? result.shooter.toLowerCase() === address.toLowerCase() : false;
-      const colLetter = LETTERS[result.col] ?? "A";
-      const targetLabel = `${colLetter}${result.row + 1}`;
+      const rowLetter = LETTERS[result.row] ?? "A";
+      const targetLabel = `${rowLetter}${result.col + 1}`;
 
       if (isMe) {
         setFoeCells((prev) => ({ ...prev, [key]: result.outcome as any }));
@@ -278,11 +283,59 @@ export function ArenaClient() {
         });
       }
     },
+    onSpectateView: (view: any) => {
+      setPhase("battle");
+      setIsMyTurn(false);
+      const players = view?.players || [];
+      const p1 = players[0]?.address || "Host";
+      const p2 = players[1]?.address || "Guest";
+      setOpponentName(`Commander ${p2.slice(0, 6)}`);
+      setOpponentAddr(p2);
+      setStatusMsg(`👁️ Live Match Observation: ${p1.slice(0, 6)}… vs ${p2.slice(0, 6)}…`);
+      if (Array.isArray(view?.shots)) {
+        const myCells: BoardCells = {};
+        const fCells: BoardCells = {};
+        const logs: ShotLogEntry[] = [];
+        view.shots.forEach((s: any) => {
+          const row = s.y;
+          const col = s.x;
+          const k = `${row},${col}`;
+          const isP0 = s.player === 0;
+          const lbl = `${LETTERS[row] ?? "A"}${col + 1}`;
+          if (isP0) {
+            fCells[k] = s.outcome;
+            logs.unshift({ cell: lbl, actor: "you", result: s.outcome });
+          } else {
+            myCells[k] = s.outcome;
+            logs.unshift({ cell: lbl, actor: "opponent", result: s.outcome });
+          }
+        });
+        setMyBoardCells(myCells);
+        setFoeCells(fCells);
+        setShotLog(logs);
+      }
+    },
     onChatMessage: (sender, text) => {
-      setChatMessages((prev) => [...prev, { sender: sender.slice(0, 8) + "…", text }]);
+      const myAddr = address?.toLowerCase();
+      const displaySender =
+        sender.toLowerCase() === myAddr
+          ? "You"
+          : sender.startsWith("0x")
+            ? `Cmdr ${sender.slice(0, 6)}`
+            : sender;
+      setChatMessages((prev) => [...prev, { sender: displaySender, text }]);
     },
     onError: (msg) => setStatusMsg(`Error: ${msg}`),
   });
+  useEffect(() => {
+    if (isSpectator && matchIdParam) {
+      setPhase("battle");
+      setIsMyTurn(false);
+      setStatusMsg("👁️ Spectator Mode active. Connecting to combat network…");
+      spectate(matchIdParam);
+    }
+  }, [isSpectator, matchIdParam, spectate]);
+
 
   // Calculate live player fleet for PlayerPanel
   const playerFleet: FleetShip[] = useMemo(() => {
@@ -619,14 +672,14 @@ export function ArenaClient() {
 
     if (matchIdParam) {
       const engineShips = playerShips.map((s) => ({
-        x: s.row,
-        y: s.col,
+        x: s.col,
+        y: s.row,
         length: s.size,
         orientation: s.vertical ? ("V" as const) : ("H" as const),
       }));
       const engineMines = playerMines.map((m) => {
         const [r, c] = m.split(",").map(Number);
-        return { x: r, y: c };
+        return { x: c, y: r };
       });
       const salt = generateSalt();
       const commitment = commitPlacement({ ships: engineShips, mines: engineMines }, salt);
@@ -748,7 +801,15 @@ export function ArenaClient() {
         const remaining = updatedEnemyShips.filter((s) => s.hits < s.size).length;
         if (remaining === 0) {
           setPhase("ended");
-          setBannerAlert({ type: "win", text: "🏆 VICTORY! ALL ENEMY SHIPS DESTROYED!" });
+          setBannerAlert({
+            type: "win",
+            text: isTournament
+              ? "🏆 TOURNAMENT VICTORY! QUALIFIER MATCH WON (+250 PTS)!"
+              : "🏆 VICTORY! ALL ENEMY SHIPS DESTROYED!",
+          });
+          if (isTournament && tournamentId) {
+            api.tournaments.register(tournamentId).catch(() => {});
+          }
           setStatusMsg("🏆 VICTORY! Commander, you annihilated the enemy fleet!");
           setAimCell(null);
           return;
@@ -944,10 +1005,63 @@ export function ArenaClient() {
     setAimLabel(`${LETTERS[r]}${c + 1}`);
   };
 
+  const handleResetSoloGame = () => {
+    if (matchIdParam) {
+      router.replace(isTournament ? `/arena?mode=tournament&tournamentId=${tournamentId}` : "/arena");
+    }
+    const fresh = generateRandomFleet();
+    setPlayerShips(fresh.ships);
+    setPlayerMines(fresh.mines);
+    setMyBoardCells({});
+    setFoeCells({});
+    setShotLog([]);
+    setPlayerScore(0);
+    setEnemyScore(0);
+    setPlayerStreak(0);
+    setEnemyStreak(0);
+    setAiFiredKeys(new Set());
+    setAiRecentHits([]);
+    setBannerAlert(null);
+    setAimCell(null);
+    setAimLabel("Pick a cell");
+    setIsMyTurn(true);
+    setTimerSecs(30);
+    setPhase("placement");
+    setPlacementReady(true);
+    setStatusMsg("Place your fleet: Click a cell to position, or hit Randomize.");
+  };
+
+  const handleForfeitMatch = async () => {
+    setShowForfeitConfirm(false);
+    if (matchIdParam) {
+      await forfeitMatch(matchIdParam);
+    }
+    setPhase("ended");
+    setBannerAlert({
+      type: "lose",
+      text: "🏳️ MATCH CONCEDED · SURRENDER RECORDED",
+    });
+    setStatusMsg("Commander conceded the sector. Opponent awarded victory.");
+  };
+
   const handleSendChat = () => {
     if (!chatInput.trim()) return;
-    setChatMessages((prev) => [...prev, { sender: "You", text: chatInput.trim() }]);
+    const text = chatInput.trim();
     setChatInput("");
+    if (matchIdParam) {
+      sendChat(matchIdParam, text);
+    } else {
+      setChatMessages((prev) => [...prev, { sender: "You", text }]);
+      setTimeout(() => {
+        const responses = [
+          "AI Tactical Unit: Target acquired. Calculating retaliation coordinates.",
+          "AI Tactical Unit: Hull integrity holding. Torpedoes primed.",
+          "AI Tactical Unit: Sonar ping detected. Preparing counterstrike.",
+        ];
+        const reply = responses[Math.floor(Math.random() * responses.length)];
+        setChatMessages((prev) => [...prev, { sender: "AI Tactical Bot", text: reply }]);
+      }, 900);
+    }
   };
 
   const pct = `${Math.round((timerSecs / 30) * 100)}%`;
@@ -964,6 +1078,25 @@ export function ArenaClient() {
 
         {/* Center Column: Game Arena */}
         <section className="arena-center">
+          {/* Tournament Mode Indicator */}
+          {isTournament && (
+            <div
+              className="mb-4 px-4 py-2.5 rounded-[12px] border flex items-center justify-between text-[13px] font-bold"
+              style={{
+                background: "rgba(235,181,74,0.12)",
+                borderColor: "rgba(235,181,74,0.35)",
+                color: "var(--brass)",
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span>🏆</span>
+                <span>TOURNAMENT COMBAT SECTOR · 10,000 ARENA POOL</span>
+              </div>
+              <span className="text-[11px] font-mono uppercase bg-[rgba(235,181,74,0.2)] px-2 py-0.5 rounded text-white">
+                2X Points
+              </span>
+            </div>
+          )}
           {/* Banner Alert */}
           {bannerAlert && (
             <div
@@ -991,17 +1124,24 @@ export function ArenaClient() {
             >
               <span>{bannerAlert.text}</span>
               {phase === "ended" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleRandomizePlacement();
-                    setPhase("placement");
-                  }}
-                  className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105"
-                  style={{ background: "var(--signal)", color: "var(--abyss)" }}
-                >
-                  Play Again
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetSoloGame}
+                    className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105"
+                    style={{ background: "var(--signal)", color: "var(--abyss)" }}
+                  >
+                    🔄 Play Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push(isTournament ? "/tournaments" : "/play")}
+                    className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105 border border-[var(--line)]"
+                    style={{ background: "rgba(19,48,59,.8)", color: "var(--foam)" }}
+                  >
+                    {isTournament ? "Tournament Sector →" : "Lobby →"}
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -1024,9 +1164,16 @@ export function ArenaClient() {
           {/* Header Bar */}
           <div className="flex items-center gap-4 mb-5 flex-wrap">
             <div>
-              <h1 className="font-display font-extrabold text-[28px] tracking-tight">
-                {phase === "placement" ? "Fleet Deployment" : "Naval Battle Arena"}
-              </h1>
+              <div className="flex items-center gap-3">
+                <h1 className="font-display font-extrabold text-[28px] tracking-tight">
+                  {phase === "placement" ? "Fleet Deployment" : "Naval Battle Arena"}
+                </h1>
+                {isSpectator && (
+                  <span className="px-3 py-1 rounded-full text-[12px] font-mono font-bold bg-[rgba(235,181,74,0.15)] text-[var(--brass)] border border-[var(--brass)] flex items-center gap-1.5">
+                    👁️ SPECTATOR MODE
+                  </span>
+                )}
+              </div>
               <p className="text-[var(--mist)] text-[14px] mt-0.5">
                 {phase === "placement"
                   ? "Position your 5 vessels and tactical mines before engaging the hostile fleet."
@@ -1034,8 +1181,20 @@ export function ArenaClient() {
               </p>
             </div>
 
+            {phase !== "ended" && !isSpectator && (
+              <button
+                type="button"
+                onClick={() => setShowForfeitConfirm(true)}
+                className="ml-auto px-3.5 py-1.5 rounded-[10px] text-[12px] font-bold text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-red-500/30 transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Surrender and concede match to opponent"
+              >
+                <span>🏳️</span>
+                <span>Forfeit Match</span>
+              </button>
+            )}
+
             {/* Timer */}
-            {phase === "battle" && (
+            {phase === "battle" && !isSpectator && (
               <div
                 className="ml-auto flex items-center gap-3 px-4 py-2 rounded-full border"
                 style={{ background: "var(--deck)", borderColor: "var(--line)" }}
@@ -1247,7 +1406,7 @@ export function ArenaClient() {
                 cells={foeCells}
                 ships={enemyBoardShips}
                 isEnemy
-                onCellClick={phase === "battle" && isMyTurn ? handleEnemyCellClick : undefined}
+                onCellClick={phase === "battle" && isMyTurn && !isSpectator ? handleEnemyCellClick : undefined}
                 aimCell={aimCell}
               />
             </div>
@@ -1357,10 +1516,82 @@ export function ArenaClient() {
         className="lower-grid grid gap-5 mt-6"
         style={{ gridTemplateColumns: "1.3fr 1fr 1fr" }}
       >
-        <LeaderboardPanel entries={LEADERBOARD} />
-        <BadgesPanel badges={BADGES} collected={3} total={5} />
-        <MatchRecord steps={MATCH_STEPS} hash={matchIdParam ?? "solo-ai-combat"} />
+        <LeaderboardPanel />
+        <BadgesPanel />
+        <MatchRecord
+          steps={[
+            {
+              label: "Fleet Commitment & Salt",
+              description: phase === "placement" ? "Arranging ships & generating cryptographic salt" : "Fleet commitments hashed and locked",
+              status: phase === "placement" ? "active" : "done",
+            },
+            {
+              label: "Salvo Exchange & Radar",
+              description:
+                phase === "placement"
+                  ? "Awaiting both commanders to deploy fleets"
+                  : phase === "battle"
+                  ? `Active salvo exchange (${isMyTurn ? "Your Fire" : "Opponent Fire"})`
+                  : "Naval engagements concluded. All primary targets neutralized.",
+              status: phase === "placement" ? "pending" : phase === "battle" ? "active" : "done",
+            },
+            {
+              label: "Proof Verification & Scoring",
+              description:
+                phase !== "ended"
+                  ? "Audit record will generate upon match conclusion"
+                  : bannerAlert?.type === "win"
+                  ? `Outcome verified: Victory (${playerScore} pts)`
+                  : `Outcome verified: Match concluded (${playerScore} pts)`,
+              status: phase !== "ended" ? "pending" : "done",
+            },
+          ]}
+          hash={matchIdParam ? `match:${matchIdParam}` : "local:solo-ai-tactical"}
+          matchId={matchIdParam}
+        />
       </div>
+      {/* Forfeit Confirmation Modal */}
+      {showForfeitConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => setShowForfeitConfirm(false)}
+        >
+          <div
+            className="w-full max-w-[420px] rounded-[20px] border border-red-500/30 p-6 space-y-4"
+            style={{ background: "linear-gradient(180deg, rgba(25,15,15,0.98), rgba(12,20,25,0.99))" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-[28px]">🏳️</span>
+              <div>
+                <h3 className="font-display font-extrabold text-[18px] text-white">
+                  Concede & Abandon Battle?
+                </h3>
+                <p className="text-[13px] text-[var(--mist)] mt-0.5">
+                  Surrendering will immediately end the match midway and award victory to your opponent.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[var(--line)]">
+              <button
+                type="button"
+                onClick={() => setShowForfeitConfirm(false)}
+                className="px-4 py-2 rounded-[10px] text-[13px] font-semibold text-[var(--mist)] hover:text-white border border-[var(--line)] hover:bg-[var(--hull)] cursor-pointer"
+              >
+                Continue Battle
+              </button>
+              <button
+                type="button"
+                onClick={handleForfeitMatch}
+                className="px-4 py-2 rounded-[10px] text-[13px] font-bold bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/40 cursor-pointer transition-all"
+              >
+                Confirm Surrender
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

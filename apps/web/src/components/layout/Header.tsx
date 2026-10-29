@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { href: "/play", label: "Play" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/tournaments", label: "Tournaments" },
+  { href: "/badges", label: "Badges" },
   { href: "/rewards", label: "Rewards" },
   { href: "/replays", label: "Replays" },
 ];

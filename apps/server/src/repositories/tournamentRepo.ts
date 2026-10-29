@@ -91,7 +91,13 @@ export class TournamentRepository {
   public async findById(tournamentId: string): Promise<ITournament | null> {
     if (isMongoConnected()) {
       try {
-        return await TournamentModel.findOne({ tournamentId });
+        const doc = await TournamentModel.findOne({ tournamentId });
+        if (doc) return doc;
+        const mem = memoryStore.tournaments.find((t) => t.tournamentId === tournamentId);
+        if (mem) {
+          const created = await TournamentModel.create(mem).catch(() => null);
+          if (created) return created;
+        }
       } catch {
         // fallback
       }
@@ -103,7 +109,18 @@ export class TournamentRepository {
     const query = status ? { status } : {};
     if (isMongoConnected()) {
       try {
-        return await TournamentModel.find(query).sort({ startTime: -1 });
+        const docs = await TournamentModel.find(query).sort({ startTime: -1 });
+        if (docs && docs.length > 0) {
+          return docs;
+        }
+        // Seed default tournaments into MongoDB if empty
+        for (const t of memoryStore.tournaments) {
+          await TournamentModel.create(t).catch(() => {});
+        }
+        const seededDocs = await TournamentModel.find(query).sort({ startTime: -1 });
+        if (seededDocs && seededDocs.length > 0) {
+          return seededDocs;
+        }
       } catch {
         // fallback
       }

@@ -21,6 +21,7 @@ export function LobbyClient() {
   const [view, setView] = useState<LobbyView>("play");
   const [joinOpen, setJoinOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [prefilledCode, setPrefilledCode] = useState("");
   const [inQueue, setInQueue] = useState(false);
   const [queueMsg, setQueueMsg] = useState("");
 
@@ -101,12 +102,20 @@ export function LobbyClient() {
             <MatchTypeCards
               onQuickMatch={handleQuickMatch}
               onAiPractice={() => router.push("/arena")}
-              onJoin={() => setJoinOpen(true)}
+              onJoin={() => {
+                setPrefilledCode("");
+                setJoinOpen(true);
+              }}
               onCreate={() => setCreateOpen(true)}
               inQueue={inQueue}
             />
             <GameModes />
-            <ActiveRooms />
+            <ActiveRooms
+              onJoinRoom={(code) => {
+                setPrefilledCode(code);
+                setJoinOpen(true);
+              }}
+            />
           </>
         )}
 
@@ -114,7 +123,15 @@ export function LobbyClient() {
         {view === "join"   && <JoinRoomPage />}
       </main>
 
-      {joinOpen   && <JoinRoomModal   onClose={() => setJoinOpen(false)} />}
+      {joinOpen && (
+        <JoinRoomModal
+          onClose={() => {
+            setJoinOpen(false);
+            setPrefilledCode("");
+          }}
+          initialCode={prefilledCode}
+        />
+      )}
       {createOpen && <CreateRoomModal onClose={() => setCreateOpen(false)} />}
     </div>
   );

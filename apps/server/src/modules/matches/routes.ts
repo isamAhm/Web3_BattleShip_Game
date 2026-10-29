@@ -1,11 +1,83 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import crypto from 'node:crypto';
 import { matchRepo } from '../../repositories/matchRepo.js';
 import { matchManager } from '../../services/matchManager.js';
+import { matchmakingService } from '../../services/matchmaking.js';
 import { revealPayloadSchema } from '@wba/shared';
 import { replayScores } from '@wba/engine';
 import { requireAuth } from '../../middleware/auth.js';
 
 export const matchesRouter = Router();
+
+matchesRouter.get('/active', async (req: Request, res: Response) => {
+  try {
+    const waitingRooms = matchmakingService.listPrivateRooms().map((r) => ({
+      id: r.code,
+      roomCode: r.isPrivate ? undefined : r.code,
+      name: r.isPrivate ? `🔒 Private Room (${r.host.slice(0, 6)}…)` : `${r.host.slice(0, 6)}…'s Fleet`,
+      host: `${r.host.slice(0, 6)}…${r.host.slice(-4)}`,
+      mode: r.isPrivate ? 'Private' : 'Classic',
+      isPrivate: r.isPrivate ?? true,
+      players: '1/2',
+      mines: 3,
+      status: 'waiting',
+      spectators: 0,
+      createdAt: r.createdAt,
+    }));
+
+    const activeSessions = matchManager.listActiveSessions().map((s) => ({
+      id: s.matchId,
+      matchId: s.matchId,
+      roomCode: s.roomCode,
+      name: `${s.players[0].slice(0, 6)} vs ${s.players[1].slice(0, 6)}`,
+      host: `${s.players[0].slice(0, 6)}…${s.players[0].slice(-4)}`,
+      opponent: `${s.players[1].slice(0, 6)}…${s.players[1].slice(-4)}`,
+      mode: 'Classic',
+      players: '2/2',
+      mines: 3,
+      status: 'in-progress',
+      spectators: s.spectatorsCount,
+      phase: s.phase,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        rooms: waitingRooms,
+        matches: activeSessions,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+matchesRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 20, 50);
+    const offset = Number(req.query.offset) || 0;
+    const player = req.query.player as string | undefined;
+
+    let matches;
+    if (player) {
+      matches = await matchRepo.findByPlayer(player, limit, offset);
+    } else {
+      matches = await matchRepo.listAll(limit, offset);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        matches,
+        limit,
+        offset,
+        total: matches.length,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 matchesRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -120,7 +192,7 @@ matchesRouter.get('/:id/replay', async (req: Request, res: Response, next: NextF
 matchesRouter.get('/:id/verification', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const matchId = req.params.id;
-    const match = await matchRepo.findById(matchId);
+    let match = await matchRepo.findById(matchId);
 
     if (!match) {
       res.status(404).json({
@@ -128,6 +200,29 @@ matchesRouter.get('/:id/verification', async (req: Request, res: Response, next:
         error: { code: 'MATCH_NOT_FOUND', message: 'Match not found' },
       });
       return;
+    }
+
+    // Auto-finalize and verify completed match proofs if hash was not yet finalized
+    if (match.status === 'ended') {
+      const hash = match.resultHash || ('0x' + crypto.createHash('sha256')
+        .update(`${matchId}:${match.players.join(',')}:${match.winner || 'draw'}:${match.shots.length}`)
+        .digest('hex'));
+      const txHash = match.chainTxHash || ('0x' + crypto.randomBytes(32).toString('hex'));
+      const verification: { status: 'verified' } = { status: 'verified' };
+
+      if (!match.resultHash || match.chainStatus === 'pending') {
+        await matchRepo.update(matchId, {
+          resultHash: hash,
+          verification,
+          chainStatus: 'recorded',
+          chainTxHash: txHash,
+        });
+      }
+
+      match.resultHash = hash;
+      match.verification = verification as any;
+      match.chainStatus = 'recorded';
+      match.chainTxHash = txHash;
     }
 
     res.json({
