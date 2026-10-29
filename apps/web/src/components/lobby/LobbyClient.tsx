@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LobbySidebar } from "./LobbySidebar";
 import { MatchTypeCards } from "./MatchTypeCards";
@@ -12,6 +12,7 @@ import { CreateRoomPage } from "./CreateRoomPage";
 import { JoinRoomPage } from "./JoinRoomPage";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
+import { getActiveMatch } from "@/lib/useNavigationGuard";
 
 export type LobbyView = "play" | "create" | "join";
 
@@ -21,9 +22,27 @@ export function LobbyClient() {
   const [view, setView] = useState<LobbyView>("play");
   const [joinOpen, setJoinOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [prefilledCode, setPrefilledCode] = useState("");
   const [inQueue, setInQueue] = useState(false);
   const [queueMsg, setQueueMsg] = useState("");
+  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
+
+  // Check for active match on mount and when returning to lobby
+  useEffect(() => {
+    const matchId = getActiveMatch();
+    console.log("[Lobby] Checking for active match:", matchId);
+    setActiveMatchId(matchId);
+
+    // Also check periodically in case of storage changes
+    const interval = setInterval(() => {
+      const currentMatch = getActiveMatch();
+      if (currentMatch !== activeMatchId) {
+        console.log("[Lobby] Active match changed:", currentMatch);
+        setActiveMatchId(currentMatch);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeMatchId]);
 
   const { joinQueue, leaveQueue } = useGameSocket({
     onMatchFound: (matchId, opponent) => {
@@ -39,17 +58,30 @@ export function LobbyClient() {
     },
   });
 
+  const handleContinueMatch = () => {
+    if (activeMatchId) {
+      router.push(`/arena?match=${activeMatchId}`);
+    }
+  };
+
   const handleQuickMatch = async () => {
     try {
       if (!address) {
         setQueueMsg("Connecting tactical identity…");
-        await login(false);
+        const loggedInAddress = await login(false);
+        if (!loggedInAddress) {
+          setQueueMsg("Authentication failed. Please try again.");
+          return;
+        }
+        // Small delay to ensure socket connects with new token
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
-      joinQueue();
       setInQueue(true);
       setQueueMsg("Searching for an opponent… (Battle Net Active)");
+      joinQueue();
     } catch (err: any) {
       setQueueMsg(`Authentication error: ${err.message}`);
+      setInQueue(false);
     }
   };
 
@@ -64,6 +96,34 @@ export function LobbyClient() {
       <LobbySidebar active={view} onChange={setView} />
 
       <main className="flex-1 min-w-0 px-8 py-8 overflow-x-hidden">
+        {/* Active match banner */}
+        {activeMatchId && (
+          <div
+            className="mb-5 px-5 py-3.5 rounded-[14px] border flex items-center gap-3 transition-all animate-fadeIn"
+            style={{
+              background: "rgba(235,181,74,0.12)",
+              borderColor: "rgba(235,181,74,0.35)",
+            }}
+          >
+            <span className="w-3 h-3 rounded-full flex-none bg-[var(--brass)]" />
+            <span className="text-[14px] font-semibold text-[var(--brass)]">
+              ⚠️ You have an active match in progress
+            </span>
+            <button
+              type="button"
+              onClick={handleContinueMatch}
+              className="ml-auto px-4 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
+              style={{
+                background: "var(--brass)",
+                color: "var(--abyss)",
+                boxShadow: "0 4px 12px -2px rgba(235,181,74,0.4)",
+              }}
+            >
+              Continue Match →
+            </button>
+          </div>
+        )}
+
         {/* Queue status banner */}
         {queueMsg && (
           <div
@@ -102,36 +162,20 @@ export function LobbyClient() {
             <MatchTypeCards
               onQuickMatch={handleQuickMatch}
               onAiPractice={() => router.push("/arena")}
-              onJoin={() => {
-                setPrefilledCode("");
-                setJoinOpen(true);
-              }}
+              onJoin={() => setJoinOpen(true)}
               onCreate={() => setCreateOpen(true)}
               inQueue={inQueue}
             />
             <GameModes />
-            <ActiveRooms
-              onJoinRoom={(code) => {
-                setPrefilledCode(code);
-                setJoinOpen(true);
-              }}
-            />
+            <ActiveRooms />
           </>
         )}
 
         {view === "create" && <CreateRoomPage />}
-        {view === "join"   && <JoinRoomPage />}
+        {view === "join" && <JoinRoomPage />}
       </main>
 
-      {joinOpen && (
-        <JoinRoomModal
-          onClose={() => {
-            setJoinOpen(false);
-            setPrefilledCode("");
-          }}
-          initialCode={prefilledCode}
-        />
-      )}
+      {joinOpen && <JoinRoomModal onClose={() => setJoinOpen(false)} />}
       {createOpen && <CreateRoomModal onClose={() => setCreateOpen(false)} />}
     </div>
   );

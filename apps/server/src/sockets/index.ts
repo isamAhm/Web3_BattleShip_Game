@@ -288,19 +288,44 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
       }
     });
 
-    // --- Forfeit / Surrender Match Midway ---
+    // --- Forfeit Match ---
     socket.on('match:forfeit', (payload, ack) => {
       try {
         const matchId = typeof payload === 'string' ? payload : payload?.matchId;
         const session = matchManager.getSession(matchId);
         if (!session) {
+          console.log(`[Socket] match:forfeit - session not found for match ${matchId}`);
           if (ack) ack({ ok: false, error: 'Match session not found' });
           return;
         }
 
+        console.log(`[Socket] match:forfeit - Player ${userAddress} forfeiting match ${matchId}`);
+
+        // Notify all players in the room immediately about the forfeit
+        const forfeitingPlayerIdx = session.getPlayerIndex(userAddress);
+        if (forfeitingPlayerIdx !== null) {
+          const otherPlayerIdx = forfeitingPlayerIdx === 0 ? 1 : 0;
+          const otherPlayer = session.matchState.players[otherPlayerIdx];
+
+          // Emit forfeit notification to the room
+          io.to(session.roomCode).emit('match:forfeit-notification', {
+            matchId,
+            forfeitedBy: userAddress,
+            winner: otherPlayer.address,
+            reason: 'resigned',
+            message: `${userAddress.slice(0, 8)}... has forfeited the match`,
+          });
+
+          console.log(`[Socket] Forfeit notification sent to room ${session.roomCode}`);
+        }
+
+        // Handle the forfeit (this will call handleEndedState internally)
         session.handleForfeit(userAddress, 'resigned');
+        console.log(`[Socket] Player ${userAddress} forfeited match ${matchId}`);
+
         if (ack) ack({ ok: true });
       } catch (err: any) {
+        console.error('[Socket] match:forfeit error:', err);
         if (ack) ack({ ok: false, error: err.message });
       }
     });

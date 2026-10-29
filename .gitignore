@@ -1,13 +1,57 @@
+# Dependencies
 node_modules
+
+# Build outputs
 dist
+.next
+out
+
+# Test coverage
 coverage
+
+# Environment files
 .env
 .env.*
 !.env.example
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# OS files
 .DS_Store
-apps/web_frontend
+*.pem
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Hardhat / Contract artifacts
 artifacts
 cache
-*.zip.next/
-.next/
+typechain-types
+
+# Legacy
+apps/web_frontend
+
+# Archives
+*.zip
+
+# # Documentation (session notes)
+# *_REPORT*.md
+# *_FINDINGS*.md
+# *_IMPLEMENTATION*.md
+# *_STATUS*.md
+# *_GUIDE*.md
+# *_FIXES*.md
+# *.backup

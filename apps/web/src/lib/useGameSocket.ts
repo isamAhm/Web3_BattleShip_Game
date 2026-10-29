@@ -21,23 +21,25 @@ export interface ShotResult {
 export interface MatchEndPayload {
   winner: string;
   forfeitedBy: string | null;
+  forfeit: boolean;
   scores: Record<string, number>;
+  reason?: string;
+  message?: string;
 }
 
 export interface GameSocketCallbacks {
-  onMatchFound?:   (matchId: string, opponent: string) => void;
-  onMatchStart?:   (matchId: string, state: unknown) => void;
-  onMatchRejoin?:  (matchId: string, state: unknown) => void;
-  onShotResult?:   (result: ShotResult) => void;
-  onTurnTimer?:    (player: string, seconds: number) => void;
-  onTurnTimeout?:  (player: string) => void;
-  onMatchEnd?:     (payload: MatchEndPayload) => void;
-  onMatchVerified?:(resultHash: string) => void;
-  onRoomCreated?:  (roomCode: string) => void;
-  onSpectateView?: (view: any) => void;
-  onChatMessage?:  (sender: string, text: string, ts: number) => void;
-  onInvite?:       (from: string) => void;
-  onError?:        (msg: string) => void;
+  onMatchFound?: (matchId: string, opponent: string) => void;
+  onMatchStart?: (matchId: string, state: unknown) => void;
+  onMatchRejoin?: (matchId: string, state: unknown) => void;
+  onShotResult?: (result: ShotResult) => void;
+  onTurnTimer?: (player: string, seconds: number) => void;
+  onTurnTimeout?: (player: string) => void;
+  onMatchEnd?: (payload: MatchEndPayload) => void;
+  onMatchVerified?: (resultHash: string) => void;
+  onRoomCreated?: (roomCode: string) => void;
+  onChatMessage?: (sender: string, text: string, ts: number) => void;
+  onInvite?: (from: string) => void;
+  onError?: (msg: string) => void;
 }
 
 export function useGameSocket(callbacks: GameSocketCallbacks) {
@@ -93,6 +95,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
         cbRef.current.onMatchEnd?.({
           winner: raw.winner,
           forfeitedBy: raw.forfeit ? raw.target : null,
+          forfeit: raw.forfeit ?? false,
           scores: { [raw.shooter]: raw.shooterScore ?? 0 },
         });
       }
@@ -107,6 +110,19 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     socket.on("match:end", (payload: MatchEndPayload) =>
       cbRef.current.onMatchEnd?.(payload));
 
+    socket.on("match:forfeit-notification", (data: any) => {
+      console.log("[Socket] Forfeit notification received:", data);
+      // Show immediate notification about forfeit
+      if (cbRef.current.onError) {
+        const isMe = typeof window !== "undefined" &&
+          data.forfeitedBy.toLowerCase() === localStorage.getItem("wba_current_addr")?.toLowerCase();
+
+        if (!isMe) {
+          cbRef.current.onError(`Opponent forfeited the match. You win!`);
+        }
+      }
+    });
+
     socket.on("match:verified", ({ resultHash }) =>
       cbRef.current.onMatchVerified?.(resultHash));
 
@@ -115,16 +131,8 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       cbRef.current.onRoomCreated?.(code);
     });
 
-    socket.on("spectate:view", (view: any) => {
-      cbRef.current.onSpectateView?.(view);
-    });
-
-    socket.on("chat:message", (data: any) => {
-      const sender = data?.username || data?.sender || "Comms";
-      const text = data?.text || "";
-      const ts = data?.timestamp || Date.now();
-      cbRef.current.onChatMessage?.(sender, text, ts);
-    });
+    socket.on("chat:message", ({ sender, text, ts }) =>
+      cbRef.current.onChatMessage?.(sender, text, ts));
 
     socket.on("invite:received", ({ from }) =>
       cbRef.current.onInvite?.(from));
@@ -137,11 +145,11 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       socket.off("match:start");
       socket.off("match:restore");
       socket.off("match:rejoin");
-      socket.off("spectate:view");
       socket.off("shot:result");
       socket.off("turn:timer");
       socket.off("turn:timeout");
       socket.off("match:end");
+      socket.off("match:forfeit-notification");
       socket.off("match:verified");
       socket.off("room:created");
       socket.off("chat:message");
@@ -152,8 +160,18 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
 
   // ── Actions ─────────────────────────────────────────────────────────────────
 
-  const joinQueue = useCallback(() => {
-    connectSocket().emit("queue:join");
+  const joinQueue = useCallback(async () => {
+    try {
+      const socket = connectSocket();
+      const connected = await waitForSocketConnection(socket, 3500);
+      if (!connected.ok) {
+        cbRef.current.onError?.(`Cannot connect to server: ${connected.error}`);
+        return;
+      }
+      socket.emit("queue:join");
+    } catch (err: any) {
+      cbRef.current.onError?.(err?.message || "Failed to join queue");
+    }
   }, []);
 
   const leaveQueue = useCallback(() => {
@@ -272,12 +290,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
 
   const forfeitMatch = useCallback(
     (matchId: string) => {
-      return new Promise<{ ok: boolean; error?: string }>((resolve) => {
-        getSocket().emit("match:forfeit", { matchId }, (ack: any) => {
-          if (ack) resolve(ack);
-          else resolve({ ok: true });
-        });
-      });
+      getSocket().emit("match:forfeit", { matchId });
     }, []
   );
 

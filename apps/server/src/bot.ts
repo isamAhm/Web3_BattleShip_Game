@@ -123,6 +123,15 @@ async function startBot() {
     console.log(`[Bot] Match ended! Winner: ${winner} (${won ? 'Bot won' : 'Player won'})`);
     socket.emit('chat:send', { matchId, text: won ? 'Honorable match!' : 'Well played, Commander!' });
 
+    // Submit reveal for verification
+    console.log('[Bot] Submitting reveal data for match verification...');
+    socket.emit('reveal:submit', {
+      matchId,
+      salt,
+      ships: validShips,
+      mines: validMines,
+    });
+
     // Automatically queue for next challenger in 3 seconds
     setTimeout(() => {
       console.log('[Bot] Re-joining matchmaking queue for next challenger...');
