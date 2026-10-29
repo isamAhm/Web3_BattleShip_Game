@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LobbySidebar } from "./LobbySidebar";
 import { MatchTypeCards } from "./MatchTypeCards";
@@ -12,6 +12,7 @@ import { CreateRoomPage } from "./CreateRoomPage";
 import { JoinRoomPage } from "./JoinRoomPage";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
+import { getActiveMatch } from "@/lib/useNavigationGuard";
 
 export type LobbyView = "play" | "create" | "join";
 
@@ -23,6 +24,25 @@ export function LobbyClient() {
   const [createOpen, setCreateOpen] = useState(false);
   const [inQueue, setInQueue] = useState(false);
   const [queueMsg, setQueueMsg] = useState("");
+  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
+
+  // Check for active match on mount and when returning to lobby
+  useEffect(() => {
+    const matchId = getActiveMatch();
+    console.log("[Lobby] Checking for active match:", matchId);
+    setActiveMatchId(matchId);
+
+    // Also check periodically in case of storage changes
+    const interval = setInterval(() => {
+      const currentMatch = getActiveMatch();
+      if (currentMatch !== activeMatchId) {
+        console.log("[Lobby] Active match changed:", currentMatch);
+        setActiveMatchId(currentMatch);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeMatchId]);
 
   const { joinQueue, leaveQueue } = useGameSocket({
     onMatchFound: (matchId, opponent) => {
@@ -37,6 +57,12 @@ export function LobbyClient() {
       setInQueue(false);
     },
   });
+
+  const handleContinueMatch = () => {
+    if (activeMatchId) {
+      router.push(`/arena?match=${activeMatchId}`);
+    }
+  };
 
   const handleQuickMatch = async () => {
     try {
@@ -70,6 +96,34 @@ export function LobbyClient() {
       <LobbySidebar active={view} onChange={setView} />
 
       <main className="flex-1 min-w-0 px-8 py-8 overflow-x-hidden">
+        {/* Active match banner */}
+        {activeMatchId && (
+          <div
+            className="mb-5 px-5 py-3.5 rounded-[14px] border flex items-center gap-3 transition-all animate-fadeIn"
+            style={{
+              background: "rgba(235,181,74,0.12)",
+              borderColor: "rgba(235,181,74,0.35)",
+            }}
+          >
+            <span className="w-3 h-3 rounded-full flex-none bg-[var(--brass)]" />
+            <span className="text-[14px] font-semibold text-[var(--brass)]">
+              ⚠️ You have an active match in progress
+            </span>
+            <button
+              type="button"
+              onClick={handleContinueMatch}
+              className="ml-auto px-4 py-2 rounded-[10px] text-[13px] font-bold transition-all hover:-translate-y-px"
+              style={{
+                background: "var(--brass)",
+                color: "var(--abyss)",
+                boxShadow: "0 4px 12px -2px rgba(235,181,74,0.4)",
+              }}
+            >
+              Continue Match →
+            </button>
+          </div>
+        )}
+
         {/* Queue status banner */}
         {queueMsg && (
           <div

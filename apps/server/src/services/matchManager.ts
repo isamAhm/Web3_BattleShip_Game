@@ -261,11 +261,26 @@ export class MatchSession {
         ? this.matchState.players[this.matchState.winner].address
         : null;
 
+    const forfeitInfo = this.matchState.forfeit
+      ? {
+        forfeitedBy: this.matchState.players[this.matchState.forfeit.by].address,
+        reason: this.matchState.forfeit.reason,
+      }
+      : null;
+
+    console.log(`[MatchSession] Match ${this.matchId} ended. Winner: ${winnerAddress}, Forfeit: ${forfeitInfo ? 'Yes' : 'No'}`);
+
+    // Emit match end event with complete information
     this.ioEmitCallback(this.roomCode, 'match:end', {
       matchId: this.matchId,
       winner: winnerAddress,
+      forfeitedBy: forfeitInfo?.forfeitedBy || null,
       forfeit: this.matchState.forfeit !== null,
+      reason: forfeitInfo?.reason,
       scores: scoresObj,
+      message: forfeitInfo
+        ? `Match ended by forfeit. ${forfeitInfo.forfeitedBy.slice(0, 8)}... surrendered.`
+        : 'Match completed.',
     });
 
     // Save preliminary ended state to DB
@@ -347,7 +362,7 @@ export class MatchManager {
   private sessions = new Map<string, MatchSession>(); // matchId -> session
   private roomToMatch = new Map<string, string>(); // roomCode -> matchId
   private playerToMatch = new Map<string, string>(); // address -> matchId
-  private ioEmit: (room: string, event: string, data: any) => void = () => {};
+  private ioEmit: (room: string, event: string, data: any) => void = () => { };
 
   public setIoEmit(fn: (room: string, event: string, data: any) => void): void {
     this.ioEmit = fn;

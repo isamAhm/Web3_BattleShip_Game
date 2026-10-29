@@ -12,6 +12,7 @@ import { BadgesPanel } from "./BadgesPanel";
 import { MatchRecord } from "./MatchRecord";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
+import { useNavigationGuard, clearActiveMatch } from "@/lib/useNavigationGuard";
 import type {
   BoardCells,
   Ship,
@@ -264,12 +265,41 @@ export function ArenaClient() {
     },
     onMatchEnd: (payload) => {
       setPhase("ended");
+      clearActiveMatch(); // Clear active match from storage
       const won = payload.winner && address ? payload.winner.toLowerCase() === address.toLowerCase() : false;
+
+      // Check if match ended by forfeit
+      const wasForfeit = payload.forfeit || payload.forfeitedBy;
+      const iForfeited = payload.forfeitedBy && address
+        ? payload.forfeitedBy.toLowerCase() === address.toLowerCase()
+        : false;
+
+      let bannerText = "";
+      if (wasForfeit) {
+        if (iForfeited) {
+          bannerText = "🏳️ MATCH CONCEDED · SURRENDER RECORDED";
+        } else {
+          bannerText = "🏆 VICTORY BY FORFEIT! OPPONENT SURRENDERED!";
+        }
+      } else {
+        bannerText = won
+          ? "🏆 VICTORY! ENEMY FLEET ANNIHILATED!"
+          : "💥 DEFEAT! ALL FRIENDLY VESSELS SUNK!";
+      }
+
       setBannerAlert({
         type: won ? "win" : "lose",
-        text: won ? "🏆 VICTORY! ENEMY FLEET ANNIHILATED!" : "💥 DEFEAT! ALL FRIENDLY VESSELS SUNK!",
+        text: bannerText,
       });
-      setStatusMsg(won ? "Match ended: Victory awarded!" : "Match ended: Defeat.");
+
+      const statusText = wasForfeit
+        ? (iForfeited
+          ? "Commander conceded the sector. Opponent awarded victory."
+          : "Opponent forfeited. Victory awarded to you!")
+        : (won ? "Match ended: Victory awarded!" : "Match ended: Defeat.");
+
+      setStatusMsg(statusText);
+
       if (matchIdParam && revealStateRef.current) {
         submitReveal({
           matchId: matchIdParam,
@@ -831,53 +861,51 @@ export function ArenaClient() {
     setChatInput("");
   };
 
-  const handleForfeit = () => {
+  const handleForfeit = async () => {
+    setShowForfeitConfirm(false);
     if (matchIdParam && forfeitMatch) {
-      forfeitMatch(matchIdParam);
+      await forfeitMatch(matchIdParam);
       setPhase("ended");
-      setBannerAlert({ type: "lose", text: "💀 MATCH FORFEITED. You have surrendered." });
-      setStatusMsg("Match forfeited. You may return to lobby.");
+      clearActiveMatch(); // Clear active match from storage
+      setBannerAlert({ type: "lose", text: "🏳️ MATCH CONCEDED · SURRENDER RECORDED" });
+      setStatusMsg("Commander conceded the sector. Opponent awarded victory.");
     } else {
       // AI match - just end it
       router.push("/play");
     }
-    setShowForfeitConfirm(false);
   };
 
-  // Navigation guard - prevent accidental navigation during active match
-  useEffect(() => {
-    // Only activate navigation guard when there's an actual matchId (not just in queue)
-    if (matchIdParam && phase !== "ended" && (phase === "battle" || phase === "placement")) {
-      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-        e.preventDefault();
-        e.returnValue = "You are in an active match. Leaving will forfeit the game. Are you sure?";
-        return e.returnValue;
-      };
+  // Navigation guard: prevent leaving during active multiplayer match
+  const shouldBlockNavigation = useMemo(() => {
+    // Block navigation if:
+    // 1. Player is in a multiplayer match (has matchIdParam)
+    // 2. Match is not ended yet
+    const shouldBlock = Boolean(matchIdParam && phase !== "ended");
+    console.log("[Arena] Navigation guard state:", {
+      matchIdParam,
+      phase,
+      shouldBlock
+    });
+    return shouldBlock;
+  }, [matchIdParam, phase]);
 
-      const handlePopState = (e: PopStateEvent) => {
-        const confirmed = window.confirm(
-          "You are in an active match. Leaving will forfeit the game. Are you sure you want to leave?"
-        );
-        if (!confirmed) {
-          e.preventDefault();
-          window.history.pushState(null, "", window.location.href);
-        } else if (forfeitMatch) {
-          forfeitMatch(matchIdParam);
+  useNavigationGuard({
+    shouldBlock: shouldBlockNavigation,
+    matchId: matchIdParam,
+    message: "You are currently in an active match. Leaving will forfeit the game and award victory to your opponent. Are you sure you want to leave?",
+    onNavigateAway: async () => {
+      // Forfeit the match when navigating away
+      if (matchIdParam && phase !== "ended") {
+        try {
+          console.log("[Arena] Forfeiting match:", matchIdParam);
+          await forfeitMatch(matchIdParam);
+          console.log("[Arena] Match forfeited successfully");
+        } catch (error) {
+          console.error("[Arena] Failed to forfeit match:", error);
         }
-      };
-
-      window.addEventListener("beforeunload", handleBeforeUnload);
-      window.addEventListener("popstate", handlePopState);
-
-      // Push initial state to enable back button detection
-      window.history.pushState(null, "", window.location.href);
-
-      return () => {
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        window.removeEventListener("popstate", handlePopState);
-      };
-    }
-  }, [phase, matchIdParam, forfeitMatch, router]);
+      }
+    },
+  });
 
   const pct = `${Math.round((timerSecs / 30) * 100)}%`;
 

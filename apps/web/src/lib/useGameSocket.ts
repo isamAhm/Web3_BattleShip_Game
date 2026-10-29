@@ -21,7 +21,10 @@ export interface ShotResult {
 export interface MatchEndPayload {
   winner: string;
   forfeitedBy: string | null;
+  forfeit: boolean;
   scores: Record<string, number>;
+  reason?: string;
+  message?: string;
 }
 
 export interface GameSocketCallbacks {
@@ -92,6 +95,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
         cbRef.current.onMatchEnd?.({
           winner: raw.winner,
           forfeitedBy: raw.forfeit ? raw.target : null,
+          forfeit: raw.forfeit ?? false,
           scores: { [raw.shooter]: raw.shooterScore ?? 0 },
         });
       }
@@ -105,6 +109,19 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
 
     socket.on("match:end", (payload: MatchEndPayload) =>
       cbRef.current.onMatchEnd?.(payload));
+
+    socket.on("match:forfeit-notification", (data: any) => {
+      console.log("[Socket] Forfeit notification received:", data);
+      // Show immediate notification about forfeit
+      if (cbRef.current.onError) {
+        const isMe = typeof window !== "undefined" &&
+          data.forfeitedBy.toLowerCase() === localStorage.getItem("wba_current_addr")?.toLowerCase();
+
+        if (!isMe) {
+          cbRef.current.onError(`Opponent forfeited the match. You win!`);
+        }
+      }
+    });
 
     socket.on("match:verified", ({ resultHash }) =>
       cbRef.current.onMatchVerified?.(resultHash));
@@ -132,6 +149,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       socket.off("turn:timer");
       socket.off("turn:timeout");
       socket.off("match:end");
+      socket.off("match:forfeit-notification");
       socket.off("match:verified");
       socket.off("room:created");
       socket.off("chat:message");
