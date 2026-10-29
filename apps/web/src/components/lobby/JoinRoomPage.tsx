@@ -122,7 +122,7 @@ export function JoinRoomPage() {
           Sector Access Code
         </p>
 
-        <div className="flex gap-2.5 justify-center mb-6" onPaste={handlePaste}>
+        <div className="flex gap-2 justify-center mb-6" onPaste={handlePaste}>
           {slots.map((s, i) => (
             <input
               key={i}
@@ -131,11 +131,12 @@ export function JoinRoomPage() {
               onChange={(e) => handleSlot(i, e.target.value)}
               onKeyDown={(e) => handleKeyDown(i, e)}
               maxLength={1}
-              className="w-13 h-16 rounded-[14px] border text-center font-display font-extrabold text-[26px] tracking-wider transition-all focus:outline-none"
+              className="w-11 h-12 rounded-[12px] border text-center font-display font-extrabold text-[20px] tracking-wider transition-all focus:outline-none focus:ring-2 focus:ring-[var(--signal)]"
               style={{
                 background: s ? "rgba(53,214,192,0.08)" : "var(--hull)",
                 borderColor: s ? "var(--signal)" : "var(--line)",
                 color: "var(--signal)",
+                flexShrink: 0,
               }}
             />
           ))}
