@@ -846,7 +846,8 @@ export function ArenaClient() {
 
   // Navigation guard - prevent accidental navigation during active match
   useEffect(() => {
-    if (phase !== "ended" && (phase === "battle" || phase === "placement")) {
+    // Only activate navigation guard when there's an actual matchId (not just in queue)
+    if (matchIdParam && phase !== "ended" && (phase === "battle" || phase === "placement")) {
       const handleBeforeUnload = (e: BeforeUnloadEvent) => {
         e.preventDefault();
         e.returnValue = "You are in an active match. Leaving will forfeit the game. Are you sure?";
@@ -860,7 +861,7 @@ export function ArenaClient() {
         if (!confirmed) {
           e.preventDefault();
           window.history.pushState(null, "", window.location.href);
-        } else if (matchIdParam && forfeitMatch) {
+        } else if (forfeitMatch) {
           forfeitMatch(matchIdParam);
         }
       };
