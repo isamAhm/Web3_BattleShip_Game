@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { shipSVG } from "@/lib/shipSvg";
 import type { BoardCells, Ship } from "@/types/game";
@@ -18,6 +18,8 @@ interface GameBoardProps {
   aimCell?: string | null;
   id: string;
   isPlacement?: boolean;
+  /** cells of ships that just sank — triggers fire animation */
+  newlySunkCells?: string[];
 }
 
 function getCellClass(state: string, isEnemy: boolean): string {
@@ -71,7 +73,10 @@ function getCellClass(state: string, isEnemy: boolean): string {
 function CellOverlay({ state }: { state: string }) {
   if (state === "hit") {
     return (
-      <span className="absolute inset-[30%] rounded-full bg-[#ffe3d9] opacity-90 pointer-events-none" />
+      <>
+        <span className="absolute inset-[30%] rounded-full bg-[#ffe3d9] opacity-90 pointer-events-none" />
+        <SmokeParticles />
+      </>
     );
   }
   if (state === "miss") {
@@ -81,15 +86,19 @@ function CellOverlay({ state }: { state: string }) {
   }
   if (state === "sunk") {
     return (
-      <span
-        className="absolute left-[24%] right-[24%] pointer-events-none"
-        style={{
-          top: "calc(50% - 1px)",
-          height: "2px",
-          background: "var(--flare)",
-          transform: "rotate(45deg)",
-        }}
-      />
+      <>
+        <span
+          className="absolute left-[24%] right-[24%] pointer-events-none"
+          style={{
+            top: "calc(50% - 1px)",
+            height: "2px",
+            background: "var(--flare)",
+            transform: "rotate(45deg)",
+          }}
+        />
+        {/* Heavier smoke on sunk */}
+        <SmokeParticles dense />
+      </>
     );
   }
   if (state === "mine") {
@@ -102,16 +111,106 @@ function CellOverlay({ state }: { state: string }) {
   }
   if (state === "boom") {
     return (
-      <span
-        className="absolute inset-[26%] bg-[#fff3cf] pointer-events-none"
-        style={{
-          clipPath:
-            "polygon(50% 0,62% 36%,100% 50%,62% 64%,50% 100%,38% 64%,0 50%,38% 36%)",
-        }}
-      />
+      <>
+        <span
+          className="absolute inset-[26%] bg-[#fff3cf] pointer-events-none"
+          style={{
+            clipPath:
+              "polygon(50% 0,62% 36%,100% 50%,62% 64%,50% 100%,38% 64%,0 50%,38% 36%)",
+          }}
+        />
+        <SmokeParticles dense color="rgba(235,181,74,0.5)" />
+      </>
     );
   }
   return null;
+}
+
+/* ── Fire overlay (shown when a ship first sinks) ───── */
+function FireOverlay() {
+  return (
+    <>
+      {/* Base fire glow */}
+      <span
+        className="absolute inset-0 rounded-[6px] pointer-events-none z-[5]"
+        style={{
+          background: "radial-gradient(ellipse at 50% 90%, rgba(255,120,30,0.85) 0%, rgba(255,60,0,0.4) 50%, transparent 75%)",
+          animation: "fire-glow 0.4s ease-in-out infinite alternate",
+        }}
+      />
+      {/* Flame tongues */}
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="absolute bottom-0 pointer-events-none z-[6]"
+          style={{
+            left: `${18 + i * 22}%`,
+            width: "22%",
+            height: "90%",
+            background: `linear-gradient(to top, rgba(255,${80 + i * 30},0,0.95), rgba(255,200,50,0.7) 50%, transparent)`,
+            borderRadius: "50% 50% 20% 20%",
+            transformOrigin: "bottom center",
+            animation: `flame-flicker ${0.5 + i * 0.15}s ease-in-out ${i * 0.1}s infinite alternate`,
+            filter: "blur(1px)",
+          }}
+        />
+      ))}
+      {/* Bright core */}
+      <span
+        className="absolute bottom-[5%] left-[25%] right-[25%] h-[30%] pointer-events-none z-[6]"
+        style={{
+          background: "radial-gradient(ellipse, rgba(255,240,100,0.95) 0%, rgba(255,140,0,0.6) 60%, transparent 100%)",
+          borderRadius: "50%",
+          animation: "fire-core 0.3s ease-in-out infinite alternate",
+          filter: "blur(1px)",
+        }}
+      />
+      {/* Embers rising */}
+      {[0, 1, 2, 3].map((i) => (
+        <span
+          key={i}
+          className="absolute pointer-events-none z-[7]"
+          style={{
+            left: `${10 + i * 22}%`,
+            bottom: "10%",
+            width: 3,
+            height: 3,
+            borderRadius: "50%",
+            background: i % 2 === 0 ? "#ff8c00" : "#ffcc00",
+            animation: `ember-rise ${1 + i * 0.25}s ease-out ${i * 0.3}s infinite`,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+/* ── Smoke particles ─────────────────────────────────── */
+function SmokeParticles({
+  dense = false,
+  color = "rgba(180,140,120,0.55)",
+}: {
+  dense?: boolean;
+  color?: string;
+}) {
+  const count = dense ? 5 : 3;
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <span
+          key={i}
+          className="smoke-puff"
+          style={{
+            // stagger each puff
+            animationDelay: `${i * 0.6}s`,
+            animationDuration: `${1.8 + i * 0.3}s`,
+            left: `${20 + i * 14}%`,
+            background: color,
+          }}
+        />
+      ))}
+    </>
+  );
 }
 
 export function GameBoard({
@@ -125,7 +224,34 @@ export function GameBoard({
   aimCell,
   id,
   isPlacement = false,
+  newlySunkCells = [],
 }: GameBoardProps) {
+  // Track which cells are currently showing fire (key → true while burning)
+  const [firingCells, setFiringCells] = useState<Set<string>>(new Set());
+  const prevSunkRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (!newlySunkCells || newlySunkCells.length === 0) return;
+    // Only trigger for genuinely new sunk cells
+    const fresh = newlySunkCells.filter((c) => !prevSunkRef.current.includes(c));
+    if (fresh.length === 0) return;
+    prevSunkRef.current = [...prevSunkRef.current, ...fresh];
+
+    setFiringCells((prev) => {
+      const next = new Set(prev);
+      fresh.forEach((c) => next.add(c));
+      return next;
+    });
+
+    // Fire burns for 3.5s then clears
+    setTimeout(() => {
+      setFiringCells((prev) => {
+        const next = new Set(prev);
+        fresh.forEach((c) => next.delete(c));
+        return next;
+      });
+    }, 3500);
+  }, [newlySunkCells]);
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!onCellClick) return;
@@ -201,6 +327,7 @@ export function GameBoard({
           {Array.from({ length: 10 }, (_, c) => {
             const key = `${r},${c}`;
             const state = key === aimCell ? "aim" : cells[key] || "empty";
+            const isBurning = firingCells.has(key);
             return (
               <button
                 key={`cell-${r}-${c}`}
@@ -211,6 +338,7 @@ export function GameBoard({
                 type="button"
               >
                 <CellOverlay state={state} />
+                {isBurning && <FireOverlay />}
               </button>
             );
           })}

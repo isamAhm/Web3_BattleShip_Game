@@ -10,6 +10,7 @@ import { ShotLog } from "./ShotLog";
 import { LeaderboardPanel } from "./LeaderboardPanel";
 import { BadgesPanel } from "./BadgesPanel";
 import { MatchRecord } from "./MatchRecord";
+import { ShotAnimation } from "./ShotAnimation";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
 import { useNavigationGuard, clearActiveMatch } from "@/lib/useNavigationGuard";
@@ -185,6 +186,12 @@ export function ArenaClient() {
   const [opponentName, setOpponentName] = useState("AI Tactical Bot");
   const [opponentAddr, setOpponentAddr] = useState("0x90F8…c9C1");
   const revealStateRef = useRef<{ salt: `0x${string}`; ships: any[]; mines: any[] } | null>(null);
+  // Shot animation state
+  const enemyBoardRef = useRef<HTMLDivElement | null>(null);
+  const [animTarget, setAnimTarget] = useState<string | null>(null);
+  const [animOutcome, setAnimOutcome] = useState<"hit" | "miss" | "sunk" | "mine" | "boom" | null>(null);
+  const [enemyBoardShake, setEnemyBoardShake] = useState(false);
+  const [newlySunkCells, setNewlySunkCells] = useState<string[]>([]);
 
   // Live Socket Hooks (for Multiplayer Match)
   const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, forfeitMatch } = useGameSocket({
@@ -738,91 +745,101 @@ export function ArenaClient() {
     // 2. Evaluate hit on enemy mines
     const isMine = enemyMines.includes(targetKey);
 
+    // Determine outcome first
+    let outcome: "hit" | "miss" | "sunk" | "mine" | "boom" = "miss";
     if (hitShip) {
-      // Register Hit
-      const updatedEnemyShips = enemyShips.map((s) => {
-        if (s.type === hitShip!.type) {
-          return { ...s, hits: s.hits + 1 };
-        }
-        return s;
-      });
-      setEnemyShips(updatedEnemyShips);
-
-      const shipNow = updatedEnemyShips.find((s) => s.type === hitShip!.type)!;
-      const isSunk = shipNow.hits >= shipNow.size;
-
-      const pts = 100 * (playerStreak >= 4 ? 2.5 : playerStreak >= 2 ? 1.75 : 1);
-      setPlayerScore((s) => s + pts);
-      setPlayerStreak((s) => s + 1);
-
-      if (isSunk) {
-        // Mark all segments as sunk
-        setFoeCells((prev) => {
-          const next = { ...prev };
-          shipNow.cells.forEach((k) => (next[k] = "sunk"));
-          return next;
-        });
-
-        setBannerAlert({
-          type: "sunk",
-          text: `💥 ENEMY ${shipNow.name.toUpperCase()} SUNK!`,
-        });
-
-        setShotLog((prev) => [
-          { cell: targetLabel, actor: "you", result: "sunk", detail: `${shipNow.name} sunk` },
-          ...prev,
-        ]);
-
-        setStatusMsg(`Direct Hit! You sunk the enemy ${shipNow.name}!`);
-
-        // Check Victory
-        const remaining = updatedEnemyShips.filter((s) => s.hits < s.size).length;
-        if (remaining === 0) {
-          setPhase("ended");
-          setBannerAlert({ type: "win", text: "🏆 VICTORY! ALL ENEMY SHIPS DESTROYED!" });
-          setStatusMsg("🏆 VICTORY! Commander, you annihilated the enemy fleet!");
-          setAimCell(null);
-          return;
-        }
-      } else {
-        setFoeCells((prev) => ({ ...prev, [targetKey]: "hit" }));
-        setBannerAlert({ type: "hit", text: `🎯 DIRECT HIT AT ${targetLabel}!` });
-        setShotLog((prev) => [
-          { cell: targetLabel, actor: "you", result: "hit", multiplier: playerStreak >= 2 ? "×1.75" : "×1.0" },
-          ...prev,
-        ]);
-        setStatusMsg(`Direct hit at ${targetLabel}! Opponent vessel taking damage.`);
-      }
+      const hitsAfter = hitShip.hits + 1;
+      outcome = hitsAfter >= hitShip.size ? "sunk" : "hit";
     } else if (isMine) {
-      setFoeCells((prev) => ({ ...prev, [targetKey]: "boom" }));
-      setPlayerScore((s) => Math.max(0, s - 30));
-      setPlayerStreak(0);
-      setBannerAlert({ type: "hit", text: `⚠️ MINE DETONATED AT ${targetLabel}! (-30 pts)` });
-      setShotLog((prev) => [
-        { cell: targetLabel, actor: "you", result: "mine", detail: "Mine −30" },
-        ...prev,
-      ]);
-      setStatusMsg(`Tactical mine detonated at ${targetLabel}!`);
-    } else {
-      // Miss
-      setFoeCells((prev) => ({ ...prev, [targetKey]: "miss" }));
-      setPlayerStreak(0);
-      setBannerAlert(null);
-      setShotLog((prev) => [
-        { cell: targetLabel, actor: "you", result: "miss" },
-        ...prev,
-      ]);
-      setStatusMsg(`Water splash at ${targetLabel}. Missed.`);
+      outcome = "boom";
     }
 
+    // Trigger shot animation
+    setAnimTarget(targetKey);
+    setAnimOutcome(outcome);
     setAimCell(null);
     setAimLabel("Pick a cell");
     setIsMyTurn(false);
 
-    // AI Retaliation after 800ms
+    // Delay board updates until animation lands (600ms)
     setTimeout(() => {
-      handleAiTurn();
-    }, 800);
+      // Shake on hit/sunk
+      if (outcome === "hit" || outcome === "sunk" || outcome === "boom") {
+        setEnemyBoardShake(true);
+        setTimeout(() => setEnemyBoardShake(false), 400);
+      }
+
+      if (hitShip) {
+        const updatedEnemyShips = enemyShips.map((s) => {
+          if (s.type === hitShip!.type) return { ...s, hits: s.hits + 1 };
+          return s;
+        });
+        setEnemyShips(updatedEnemyShips);
+
+        const shipNow = updatedEnemyShips.find((s) => s.type === hitShip!.type)!;
+        const isSunk = shipNow.hits >= shipNow.size;
+
+        const pts = 100 * (playerStreak >= 4 ? 2.5 : playerStreak >= 2 ? 1.75 : 1);
+        setPlayerScore((s) => s + pts);
+        setPlayerStreak((s) => s + 1);
+
+        if (isSunk) {
+          setFoeCells((prev) => {
+            const next = { ...prev };
+            shipNow.cells.forEach((k) => (next[k] = "sunk"));
+            return next;
+          });
+          // Trigger fire animation on all sunk ship cells
+          setNewlySunkCells(shipNow.cells);
+          // Clear after fire duration (3.5s)
+          setTimeout(() => setNewlySunkCells([]), 3600);
+          setBannerAlert({ type: "sunk", text: `💥 ENEMY ${shipNow.name.toUpperCase()} SUNK!` });
+          setShotLog((prev) => [
+            { cell: targetLabel, actor: "you", result: "sunk", detail: `${shipNow.name} sunk` },
+            ...prev,
+          ]);
+          setStatusMsg(`Direct Hit! You sunk the enemy ${shipNow.name}!`);
+
+          const remaining = updatedEnemyShips.filter((s) => s.hits < s.size).length;
+          if (remaining === 0) {
+            setPhase("ended");
+            setBannerAlert({ type: "win", text: "🏆 VICTORY! ALL ENEMY SHIPS DESTROYED!" });
+            setStatusMsg("🏆 VICTORY! Commander, you annihilated the enemy fleet!");
+            return;
+          }
+        } else {
+          setFoeCells((prev) => ({ ...prev, [targetKey]: "hit" }));
+          setBannerAlert({ type: "hit", text: `🎯 DIRECT HIT AT ${targetLabel}!` });
+          setShotLog((prev) => [
+            { cell: targetLabel, actor: "you", result: "hit", multiplier: playerStreak >= 2 ? "×1.75" : "×1.0" },
+            ...prev,
+          ]);
+          setStatusMsg(`Direct hit at ${targetLabel}! Opponent vessel taking damage.`);
+        }
+      } else if (isMine) {
+        setFoeCells((prev) => ({ ...prev, [targetKey]: "boom" }));
+        setPlayerScore((s) => Math.max(0, s - 30));
+        setPlayerStreak(0);
+        setBannerAlert({ type: "hit", text: `⚠️ MINE DETONATED AT ${targetLabel}! (-30 pts)` });
+        setShotLog((prev) => [
+          { cell: targetLabel, actor: "you", result: "mine", detail: "Mine −30" },
+          ...prev,
+        ]);
+        setStatusMsg(`Tactical mine detonated at ${targetLabel}!`);
+      } else {
+        setFoeCells((prev) => ({ ...prev, [targetKey]: "miss" }));
+        setPlayerStreak(0);
+        setBannerAlert(null);
+        setShotLog((prev) => [
+          { cell: targetLabel, actor: "you", result: "miss" },
+          ...prev,
+        ]);
+        setStatusMsg(`Water splash at ${targetLabel}. Missed.`);
+      }
+
+      // AI Retaliation after animation
+      setTimeout(() => { handleAiTurn(); }, 400);
+    }, 650);
   };
 
   const handleAiTurn = () => {
@@ -1326,21 +1343,24 @@ export function ArenaClient() {
             </div>
 
             {/* Enemy Board */}
-            <div className="min-w-0">
+            <div className="min-w-0" ref={enemyBoardRef}>
               <h2 className="flex justify-between items-baseline mb-3 px-1 font-display font-bold text-[17px] tracking-tight">
                 Enemy Waters
                 <span className="font-body font-medium text-[13px] text-[var(--signal)]">
                   {opponentShipsLeft} of 5 hostile vessels
                 </span>
               </h2>
-              <GameBoard
-                id="foe"
-                cells={foeCells}
-                ships={enemyBoardShips}
-                isEnemy
-                onCellClick={phase === "battle" && isMyTurn ? handleEnemyCellClick : undefined}
-                aimCell={aimCell}
-              />
+              <div className={enemyBoardShake ? "board-shake" : ""}>
+                <GameBoard
+                  id="foe"
+                  cells={foeCells}
+                  ships={enemyBoardShips}
+                  isEnemy
+                  onCellClick={phase === "battle" && isMyTurn ? handleEnemyCellClick : undefined}
+                  aimCell={aimCell}
+                  newlySunkCells={newlySunkCells}
+                />
+              </div>
             </div>
           </div>
 
@@ -1452,6 +1472,14 @@ export function ArenaClient() {
         <BadgesPanel badges={BADGES} collected={3} total={5} />
         <MatchRecord steps={MATCH_STEPS} hash={matchIdParam ?? "solo-ai-combat"} />
       </div>
+
+      {/* Shot animation overlay */}
+      <ShotAnimation
+        boardRef={enemyBoardRef}
+        targetCell={animTarget}
+        outcome={animOutcome}
+        onDone={() => { setAnimTarget(null); setAnimOutcome(null); }}
+      />
 
       {/* Forfeit Confirmation Modal */}
       {showForfeitConfirm && (
