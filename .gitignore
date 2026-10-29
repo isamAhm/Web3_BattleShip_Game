@@ -10,3 +10,4 @@ apps/web_frontend
 artifacts
 cache
 *.zip.next/
+.next/
