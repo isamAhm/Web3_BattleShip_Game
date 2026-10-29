@@ -21,7 +21,6 @@ export function LobbyClient() {
   const [view, setView] = useState<LobbyView>("play");
   const [joinOpen, setJoinOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [prefilledCode, setPrefilledCode] = useState("");
   const [inQueue, setInQueue] = useState(false);
   const [queueMsg, setQueueMsg] = useState("");
 
@@ -43,13 +42,20 @@ export function LobbyClient() {
     try {
       if (!address) {
         setQueueMsg("Connecting tactical identity…");
-        await login(false);
+        const loggedInAddress = await login(false);
+        if (!loggedInAddress) {
+          setQueueMsg("Authentication failed. Please try again.");
+          return;
+        }
+        // Small delay to ensure socket connects with new token
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
-      joinQueue();
       setInQueue(true);
       setQueueMsg("Searching for an opponent… (Battle Net Active)");
+      joinQueue();
     } catch (err: any) {
       setQueueMsg(`Authentication error: ${err.message}`);
+      setInQueue(false);
     }
   };
 
@@ -102,36 +108,20 @@ export function LobbyClient() {
             <MatchTypeCards
               onQuickMatch={handleQuickMatch}
               onAiPractice={() => router.push("/arena")}
-              onJoin={() => {
-                setPrefilledCode("");
-                setJoinOpen(true);
-              }}
+              onJoin={() => setJoinOpen(true)}
               onCreate={() => setCreateOpen(true)}
               inQueue={inQueue}
             />
             <GameModes />
-            <ActiveRooms
-              onJoinRoom={(code) => {
-                setPrefilledCode(code);
-                setJoinOpen(true);
-              }}
-            />
+            <ActiveRooms />
           </>
         )}
 
         {view === "create" && <CreateRoomPage />}
-        {view === "join"   && <JoinRoomPage />}
+        {view === "join" && <JoinRoomPage />}
       </main>
 
-      {joinOpen && (
-        <JoinRoomModal
-          onClose={() => {
-            setJoinOpen(false);
-            setPrefilledCode("");
-          }}
-          initialCode={prefilledCode}
-        />
-      )}
+      {joinOpen && <JoinRoomModal onClose={() => setJoinOpen(false)} />}
       {createOpen && <CreateRoomModal onClose={() => setCreateOpen(false)} />}
     </div>
   );

@@ -288,20 +288,20 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
       }
     });
 
-    // --- Forfeit / Surrender Match Midway ---
-    socket.on('match:forfeit', (payload, ack) => {
+    // --- Forfeit Match ---
+    socket.on('match:forfeit', (payload) => {
       try {
-        const matchId = typeof payload === 'string' ? payload : payload?.matchId;
+        const { matchId } = payload;
         const session = matchManager.getSession(matchId);
         if (!session) {
-          if (ack) ack({ ok: false, error: 'Match session not found' });
+          socket.emit('error', { message: 'Match session not found' });
           return;
         }
 
         session.handleForfeit(userAddress, 'resigned');
-        if (ack) ack({ ok: true });
+        console.log(`[Socket] Player ${userAddress} forfeited match ${matchId}`);
       } catch (err: any) {
-        if (ack) ack({ ok: false, error: err.message });
+        socket.emit('error', { message: err.message });
       }
     });
 
