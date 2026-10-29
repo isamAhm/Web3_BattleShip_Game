@@ -270,6 +270,17 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     }, []
   );
 
+  const forfeitMatch = useCallback(
+    (matchId: string) => {
+      return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        getSocket().emit("match:forfeit", { matchId }, (ack: any) => {
+          if (ack) resolve(ack);
+          else resolve({ ok: true });
+        });
+      });
+    }, []
+  );
+
   return {
     joinQueue,
     leaveQueue,
@@ -281,5 +292,6 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     sendChat,
     spectate,
     sendInvite,
+    forfeitMatch,
   };
 }

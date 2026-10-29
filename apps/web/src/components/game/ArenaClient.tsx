@@ -129,6 +129,7 @@ export function ArenaClient() {
   const [isVertical, setIsVertical] = useState(false);
   const [placementReady, setPlacementReady] = useState(false);
   const [placementMode, setPlacementMode] = useState<"ships" | "mines">("ships");
+  const [showForfeitConfirm, setShowForfeitConfirm] = useState(false);
 
   // Hidden Enemy Fleet (AI or Opponent)
   const [enemyShips, setEnemyShips] = useState<PlacedShip[]>(() => generateRandomFleet().ships);
@@ -189,7 +190,7 @@ export function ArenaClient() {
   const revealStateRef = useRef<{ salt: `0x${string}`; ships: any[]; mines: any[] } | null>(null);
 
   // Live Socket Hooks (for Multiplayer Match)
-  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, spectate } = useGameSocket({
+  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, spectate, forfeitMatch } = useGameSocket({
     onMatchFound: (matchId, opponent) => {
       setInQueue(false);
       setOpponentName(`Commander ${opponent.slice(0, 6)}`);
@@ -910,6 +911,19 @@ export function ArenaClient() {
     setStatusMsg("Place your fleet: Click a cell to position, or hit Randomize.");
   };
 
+  const handleForfeitMatch = async () => {
+    setShowForfeitConfirm(false);
+    if (matchIdParam) {
+      await forfeitMatch(matchIdParam);
+    }
+    setPhase("ended");
+    setBannerAlert({
+      type: "lose",
+      text: "🏳️ MATCH CONCEDED · SURRENDER RECORDED",
+    });
+    setStatusMsg("Commander conceded the sector. Opponent awarded victory.");
+  };
+
   const handleSendChat = () => {
     if (!chatInput.trim()) return;
     const text = chatInput.trim();
@@ -1046,6 +1060,18 @@ export function ArenaClient() {
                   : `Engaged vs AI Opponent · ${isMyTurn ? "Your turn to strike" : "AI calculating counter-fire"}`}
               </p>
             </div>
+
+            {phase !== "ended" && !isSpectator && (
+              <button
+                type="button"
+                onClick={() => setShowForfeitConfirm(true)}
+                className="ml-auto px-3.5 py-1.5 rounded-[10px] text-[12px] font-bold text-red-400 hover:text-red-300 hover:bg-red-950/40 border border-red-500/30 transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Surrender and concede match to opponent"
+              >
+                <span>🏳️</span>
+                <span>Forfeit Match</span>
+              </button>
+            )}
 
             {/* Timer */}
             {phase === "battle" && !isSpectator && (
@@ -1394,6 +1420,48 @@ export function ArenaClient() {
           matchId={matchIdParam}
         />
       </div>
+      {/* Forfeit Confirmation Modal */}
+      {showForfeitConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => setShowForfeitConfirm(false)}
+        >
+          <div
+            className="w-full max-w-[420px] rounded-[20px] border border-red-500/30 p-6 space-y-4"
+            style={{ background: "linear-gradient(180deg, rgba(25,15,15,0.98), rgba(12,20,25,0.99))" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-[28px]">🏳️</span>
+              <div>
+                <h3 className="font-display font-extrabold text-[18px] text-white">
+                  Concede & Abandon Battle?
+                </h3>
+                <p className="text-[13px] text-[var(--mist)] mt-0.5">
+                  Surrendering will immediately end the match midway and award victory to your opponent.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[var(--line)]">
+              <button
+                type="button"
+                onClick={() => setShowForfeitConfirm(false)}
+                className="px-4 py-2 rounded-[10px] text-[13px] font-semibold text-[var(--mist)] hover:text-white border border-[var(--line)] hover:bg-[var(--hull)] cursor-pointer"
+              >
+                Continue Battle
+              </button>
+              <button
+                type="button"
+                onClick={handleForfeitMatch}
+                className="px-4 py-2 rounded-[10px] text-[13px] font-bold bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/40 cursor-pointer transition-all"
+              >
+                Confirm Surrender
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

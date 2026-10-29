@@ -288,6 +288,23 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
       }
     });
 
+    // --- Forfeit / Surrender Match Midway ---
+    socket.on('match:forfeit', (payload, ack) => {
+      try {
+        const matchId = typeof payload === 'string' ? payload : payload?.matchId;
+        const session = matchManager.getSession(matchId);
+        if (!session) {
+          if (ack) ack({ ok: false, error: 'Match session not found' });
+          return;
+        }
+
+        session.handleForfeit(userAddress, 'resigned');
+        if (ack) ack({ ok: true });
+      } catch (err: any) {
+        if (ack) ack({ ok: false, error: err.message });
+      }
+    });
+
     // --- Spectate ---
     socket.on('spectate:join', (payload) => {
       try {
