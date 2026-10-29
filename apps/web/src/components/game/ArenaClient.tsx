@@ -12,6 +12,7 @@ import { BadgesPanel } from "./BadgesPanel";
 import { MatchRecord } from "./MatchRecord";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
+import { api } from "@/lib/api";
 import type {
   BoardCells,
   Ship,
@@ -114,6 +115,8 @@ export function ArenaClient() {
   const searchParams = useSearchParams();
   const matchIdParam = searchParams.get("match");
   const isSpectator = searchParams.get("spectate") === "true";
+  const isTournament = searchParams.get("mode") === "tournament" || Boolean(searchParams.get("tournamentId"));
+  const tournamentId = searchParams.get("tournamentId") || "tourn_season_1_championship";
   const { address } = useAuthCtx();
 
   // Phase: placement -> battle -> ended
@@ -181,7 +184,7 @@ export function ArenaClient() {
     return () => clearInterval(t);
   }, [phase, isMyTurn]);
 
-  const [opponentName, setOpponentName] = useState("AI Tactical Bot");
+  const [opponentName, setOpponentName] = useState(() => isTournament ? "Grand Admiral (Seed #1)" : "AI Tactical Bot");
   const [opponentAddr, setOpponentAddr] = useState("0x90F8…c9C1");
   const revealStateRef = useRef<{ salt: `0x${string}`; ships: any[]; mines: any[] } | null>(null);
 
@@ -677,7 +680,15 @@ export function ArenaClient() {
         const remaining = updatedEnemyShips.filter((s) => s.hits < s.size).length;
         if (remaining === 0) {
           setPhase("ended");
-          setBannerAlert({ type: "win", text: "🏆 VICTORY! ALL ENEMY SHIPS DESTROYED!" });
+          setBannerAlert({
+            type: "win",
+            text: isTournament
+              ? "🏆 TOURNAMENT VICTORY! QUALIFIER MATCH WON (+250 PTS)!"
+              : "🏆 VICTORY! ALL ENEMY SHIPS DESTROYED!",
+          });
+          if (isTournament && tournamentId) {
+            api.tournaments.register(tournamentId).catch(() => {});
+          }
           setStatusMsg("🏆 VICTORY! Commander, you annihilated the enemy fleet!");
           setAimCell(null);
           return;
@@ -875,7 +886,7 @@ export function ArenaClient() {
 
   const handleResetSoloGame = () => {
     if (matchIdParam) {
-      router.push("/arena");
+      router.replace(isTournament ? `/arena?mode=tournament&tournamentId=${tournamentId}` : "/arena");
     }
     const fresh = generateRandomFleet();
     setPlayerShips(fresh.ships);
@@ -933,6 +944,25 @@ export function ArenaClient() {
 
         {/* Center Column: Game Arena */}
         <section className="arena-center">
+          {/* Tournament Mode Indicator */}
+          {isTournament && (
+            <div
+              className="mb-4 px-4 py-2.5 rounded-[12px] border flex items-center justify-between text-[13px] font-bold"
+              style={{
+                background: "rgba(235,181,74,0.12)",
+                borderColor: "rgba(235,181,74,0.35)",
+                color: "var(--brass)",
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span>🏆</span>
+                <span>TOURNAMENT COMBAT SECTOR · 10,000 ARENA POOL</span>
+              </div>
+              <span className="text-[11px] font-mono uppercase bg-[rgba(235,181,74,0.2)] px-2 py-0.5 rounded text-white">
+                2X Points
+              </span>
+            </div>
+          )}
           {/* Banner Alert */}
           {bannerAlert && (
             <div
@@ -967,15 +997,15 @@ export function ArenaClient() {
                     className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105"
                     style={{ background: "var(--signal)", color: "var(--abyss)" }}
                   >
-                    {matchIdParam ? "Practice vs AI (Solo)" : "Play Again"}
+                    🔄 Play Again
                   </button>
                   <button
                     type="button"
-                    onClick={() => router.push("/play")}
+                    onClick={() => router.push(isTournament ? "/tournaments" : "/play")}
                     className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105 border border-[var(--line)]"
                     style={{ background: "rgba(19,48,59,.8)", color: "var(--foam)" }}
                   >
-                    Lobby / New Match →
+                    {isTournament ? "Tournament Sector →" : "Lobby →"}
                   </button>
                 </div>
               )}

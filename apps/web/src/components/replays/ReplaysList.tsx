@@ -44,6 +44,15 @@ export function ReplaysList() {
     try {
       const result = await api.matchVerify(matchId);
       setVerifyResults((prev) => ({ ...prev, [matchId]: result }));
+      if (result.stored) {
+        setMatches((prev) =>
+          prev.map((m) =>
+            m.matchId === matchId
+              ? { ...m, resultHash: result.stored, chainStatus: "recorded", txHash: result.chainTx || m.txHash }
+              : m
+          )
+        );
+      }
     } catch {
       setVerifyResults((prev) => ({
         ...prev,
