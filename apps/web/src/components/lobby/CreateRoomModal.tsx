@@ -55,7 +55,7 @@ export function CreateRoomModal({ onClose }: { onClose: () => void }) {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null;
       if (!address || !token) {
-        await login(false);
+        await login();
       }
       let res = await createRoom(roomCode);
       if (!res.ok) {
@@ -63,7 +63,7 @@ export function CreateRoomModal({ onClose }: { onClose: () => void }) {
         const errLower = (res.error || "").toLowerCase();
         if (errLower.includes("unauthorized") || errLower.includes("session") || errLower.includes("connect")) {
           console.log("[CreateRoomModal] Connection or session expired, acquiring fresh session...");
-          await login(false);
+          await login();
           res = await createRoom(roomCode);
         }
       }

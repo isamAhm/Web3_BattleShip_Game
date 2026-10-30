@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/layout/ThemeProvider";
 import { THEMES } from "@/lib/themes";
 import { useAuthCtx } from "@/lib/AuthContext";
+import { CHAIN_NAME, ALLOW_DEV_WALLET } from "@/lib/config";
 import { useState } from "react";
 
 const NAV_LINKS = [
@@ -24,15 +25,18 @@ export function Header() {
   const { themeId, setTheme } = useTheme();
   const { address, login, logout, switchDevIdentity } = useAuthCtx();
   const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   const nextTheme = THEMES.find((t) => t.id !== themeId)!;
 
   const handleConnect = async () => {
     setConnecting(true);
+    setConnectError(null);
     try {
-      await login(true);
-    } catch (err) {
+      await login();
+    } catch (err: any) {
       console.error("Connect failed:", err);
+      setConnectError(err?.message ?? "Could not connect your wallet");
     } finally {
       setConnecting(false);
     }
@@ -143,13 +147,14 @@ export function Header() {
               className="w-1.5 h-1.5 rounded-full animate-pulse"
               style={{ background: "var(--signal)" }}
             />
-            Base Sepolia
+            {CHAIN_NAME}
           </div>
         )}
 
         {/* Wallet & Identity Controls */}
         {address ? (
           <div className="flex items-center gap-2">
+            {ALLOW_DEV_WALLET && (
             <button
               type="button"
               onClick={switchDevIdentity}
@@ -159,6 +164,7 @@ export function Header() {
               <span>⚡</span>
               <span className="hidden sm:inline">New Player</span>
             </button>
+            )}
 
             <div
               className="hidden sm:flex items-center gap-2.5 pl-3.5 pr-2 py-1.5 rounded-full border font-semibold"
@@ -196,6 +202,11 @@ export function Header() {
             <WalletIcon />
             {connecting ? "Connecting…" : "Connect Wallet"}
           </button>
+        )}
+        {!address && connectError && (
+          <span role="alert" className="max-w-[240px] text-[12px] text-[var(--flare)]">
+            {connectError}
+          </span>
         )}
       </div>
     </header>

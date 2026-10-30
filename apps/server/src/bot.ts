@@ -18,8 +18,10 @@ async function authenticate(): Promise<{ cookie: string; sessionToken: string }>
   const nonce = nonceJson.data?.nonce ?? nonceJson.nonce;
 
   // 2. Sign SIWE message
-  const domain = 'localhost:3000';
-  const uri = 'http://localhost:3000';
+  // Must match the server's SIWE_DOMAIN / SIWE_URI / SUPPORTED_CHAIN_ID
+  const domain = process.env.SIWE_DOMAIN ?? 'localhost:3000';
+  const uri = process.env.SIWE_URI ?? 'http://localhost:3000';
+  const chainId = Number(process.env.SUPPORTED_CHAIN_ID ?? 11155111);
   const issuedAt = new Date().toISOString();
   const message = [
     `${domain} wants you to sign in with your Ethereum account:`,
@@ -29,7 +31,7 @@ async function authenticate(): Promise<{ cookie: string; sessionToken: string }>
     '',
     `URI: ${uri}`,
     'Version: 1',
-    'Chain ID: 84532',
+    `Chain ID: ${chainId}`,
     `Nonce: ${nonce}`,
     `Issued At: ${issuedAt}`,
   ].join('\n');

@@ -91,14 +91,14 @@ export function JoinRoomModal({
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null;
       if (!address || !token) {
-        await login(false);
+        await login();
       }
       let res = await joinRoom(code);
       if (!res.ok) {
         const errLower = (res.error || "").toLowerCase();
         if (errLower.includes("unauthorized") || errLower.includes("session") || errLower.includes("connect")) {
           console.log("[JoinRoomModal] Session stale or disconnected, acquiring fresh session...");
-          await login(false);
+          await login();
           res = await joinRoom(code);
         }
       }

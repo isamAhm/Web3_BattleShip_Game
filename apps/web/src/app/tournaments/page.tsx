@@ -60,7 +60,7 @@ export default function TournamentsPage() {
       const token = typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null;
       let userAddr = address;
       if (!userAddr || !token) {
-        userAddr = await login(false);
+        userAddr = await login();
       }
 
       const res = await api.tournaments.register(tId);

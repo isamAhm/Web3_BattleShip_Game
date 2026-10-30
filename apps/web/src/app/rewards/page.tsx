@@ -84,7 +84,7 @@ export default function RewardsPage() {
         ) : (
           <button
             type="button"
-            onClick={() => login(false)}
+            onClick={() => login()}
             className="flex items-center gap-2 px-5 py-2.5 rounded-[12px] font-bold text-[14px] transition-all"
             style={{
               background: "var(--accent-cta)",

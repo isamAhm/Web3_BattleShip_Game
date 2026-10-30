@@ -6,6 +6,23 @@ import { playerRepo } from '../repositories/playerRepo.js';
 import { SessionUser } from '@wba/shared';
 
 const NONCE_TTL_SECONDS = 300; // 5 minutes
+/** A signed login message is only honoured shortly after it was created. */
+const MAX_MESSAGE_AGE_MS = 10 * 60 * 1000;
+const MAX_CLOCK_SKEW_MS = 60 * 1000;
+
+/** Login failures are the caller's fault (401), not server errors. */
+export class AuthError extends Error {
+  public readonly status = 401;
+  public readonly code = 'AUTH_FAILED';
+}
+
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
 
 export class AuthService {
   public async generateNonce(): Promise<{ nonce: string; expiresAt: number }> {
@@ -23,25 +40,48 @@ export class AuthService {
     messageStr: string,
     signature: string,
   ): Promise<{ sessionToken: string; user: SessionUser; player: any }> {
-    const siweMessage = new SiweMessage(messageStr);
-
-    // Verify domain and address format
-    if (env.NODE_ENV === 'production') {
-      if (siweMessage.domain !== env.SIWE_DOMAIN) {
-        throw new Error(
-          `Invalid SIWE domain: expected ${env.SIWE_DOMAIN}, got ${siweMessage.domain}`,
-        );
-      }
+    let siweMessage: SiweMessage;
+    try {
+      siweMessage = new SiweMessage(messageStr);
+    } catch (err) {
+      throw new AuthError(`Invalid SIWE message: ${(err as Error).message ?? 'malformed'}`);
     }
 
-    // Verify SIWE signature and validate fields
-    const verifyResult = await siweMessage.verify({
-      signature,
-      domain: env.NODE_ENV === 'production' ? env.SIWE_DOMAIN : undefined,
-    });
+    // The message must be for THIS app on THIS chain, in every environment.
+    if (siweMessage.domain !== env.SIWE_DOMAIN) {
+      throw new AuthError(
+        `Invalid SIWE domain: expected ${env.SIWE_DOMAIN}, got ${siweMessage.domain}`,
+      );
+    }
+    if (!sameOrigin(siweMessage.uri, env.SIWE_URI)) {
+      throw new AuthError(`Invalid SIWE uri: expected ${env.SIWE_URI}, got ${siweMessage.uri}`);
+    }
+    if (siweMessage.chainId !== env.SUPPORTED_CHAIN_ID) {
+      throw new AuthError(
+        `Unsupported chain: expected ${env.SUPPORTED_CHAIN_ID}, got ${siweMessage.chainId}`,
+      );
+    }
+    const issuedAtMs = siweMessage.issuedAt ? Date.parse(siweMessage.issuedAt) : NaN;
+    const checkedAt = Date.now();
+    if (
+      !Number.isFinite(issuedAtMs) ||
+      checkedAt - issuedAtMs > MAX_MESSAGE_AGE_MS ||
+      issuedAtMs - checkedAt > MAX_CLOCK_SKEW_MS
+    ) {
+      throw new AuthError('SIWE message is too old or not yet valid. Please sign in again.');
+    }
 
+    // Verify the signature (also enforces expirationTime / notBefore when present).
+    // siwe rejects with a SiweError on failure instead of returning success: false.
+    let verifyResult: Awaited<ReturnType<SiweMessage['verify']>>;
+    try {
+      verifyResult = await siweMessage.verify({ signature, domain: env.SIWE_DOMAIN });
+    } catch (err) {
+      const type = (err as { error?: { type?: string } })?.error?.type ?? 'Invalid signature';
+      throw new AuthError(`SIWE verification failed: ${type}`);
+    }
     if (!verifyResult.success) {
-      throw new Error(
+      throw new AuthError(
         `SIWE verification failed: ${verifyResult.error?.type || 'Invalid signature'}`,
       );
     }
@@ -52,7 +92,7 @@ export class AuthService {
     const nonceKey = `siwe:nonce:${nonce}`;
     const consumed = await redisService.getdel(nonceKey);
     if (!consumed) {
-      throw new Error('Nonce expired or already used');
+      throw new AuthError('Nonce expired or already used');
     }
 
     const normalizedAddress = address.toLowerCase();

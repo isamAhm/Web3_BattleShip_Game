@@ -119,7 +119,7 @@ describe('SIWE Authentication & Session Security', () => {
     const secondVerify = await request(app)
       .post('/api/auth/verify')
       .send({ message: messageStr, signature });
-    expect(secondVerify.status).toBe(500);
+    expect(secondVerify.status).toBe(401);
     expect(secondVerify.body.success).toBe(false);
   });
 
@@ -149,7 +149,72 @@ describe('SIWE Authentication & Session Security', () => {
       .post('/api/auth/verify')
       .send({ message: messageStr, signature: forgedSignature });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
+  });
+
+  describe('login message validation', () => {
+    const login = async (overrides: Record<string, unknown> = {}) => {
+      const account = privateKeyToAccount(generatePrivateKey());
+      const nonce = (await request(app).get('/api/auth/nonce')).body.data.nonce;
+      const message = new SiweMessage({
+        domain: 'localhost:3000',
+        address: account.address,
+        statement: 'Sign in to Web3 Battle Arena',
+        uri: 'http://localhost:3000',
+        version: '1',
+        chainId: 11155111,
+        nonce,
+        issuedAt: new Date().toISOString(),
+        ...overrides,
+      }).prepareMessage();
+      const signature = await account.signMessage({ message });
+      return request(app).post('/api/auth/verify').send({ message, signature });
+    };
+
+    it('accepts a correct message', async () => {
+      expect((await login()).status).toBe(200);
+    });
+
+    it('rejects a message for another chain', async () => {
+      const res = await login({ chainId: 1 });
+      expect(res.status).toBe(401);
+      expect(res.body.error.message).toMatch(/Unsupported chain/);
+    });
+
+    it('rejects a message for another domain', async () => {
+      const res = await login({ domain: 'evil.example' });
+      expect(res.status).toBe(401);
+      expect(res.body.error.message).toMatch(/Invalid SIWE domain/);
+    });
+
+    it('rejects a message for another origin (uri)', async () => {
+      const res = await login({ uri: 'https://evil.example' });
+      expect(res.status).toBe(401);
+      expect(res.body.error.message).toMatch(/Invalid SIWE uri/);
+    });
+
+    it('rejects a stale message', async () => {
+      const res = await login({ issuedAt: '2020-01-01T00:00:00.000Z' });
+      expect(res.status).toBe(401);
+      expect(res.body.error.message).toMatch(/too old/);
+    });
+
+    it('rejects a message issued in the future', async () => {
+      const res = await login({ issuedAt: new Date(Date.now() + 3600_000).toISOString() });
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects an already expired message', async () => {
+      const res = await login({ expirationTime: new Date(Date.now() - 1000).toISOString() });
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects garbage as a 401, not a server error', async () => {
+      const res = await request(app)
+        .post('/api/auth/verify')
+        .send({ message: 'not a siwe message', signature: `0x${'ab'.repeat(65)}` });
+      expect(res.status).toBe(401);
+    });
   });
 });

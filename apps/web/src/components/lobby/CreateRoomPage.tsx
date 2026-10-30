@@ -52,14 +52,14 @@ export function CreateRoomPage() {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null;
       if (!address || !token) {
-        await login(false);
+        await login();
       }
       let res = await createRoom(roomCode);
       if (!res.ok) {
         const errLower = (res.error || "").toLowerCase();
         if (errLower.includes("unauthorized") || errLower.includes("session") || errLower.includes("connect")) {
           console.log("[CreateRoomPage] Session stale or disconnected, acquiring fresh session...");
-          await login(false);
+          await login();
           res = await createRoom(roomCode);
         }
       }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { connectSocket } from "./socket";
+import { connectSocket, disconnectSocket } from "./socket";
+import { buildSiweMessage } from "./wallet/siwe";
 
 const SERVER =
   process.env.NEXT_PUBLIC_SERVER_URL ??
@@ -39,23 +40,14 @@ export function useAuth() {
    * Pass this to your wallet's signMessage.
    */
   const buildMessage = useCallback(
-    (address: string, nonce: string, chainId: number): string => {
-      const domain = window.location.host;
-      const uri    = window.location.origin;
-      const now    = new Date().toISOString();
-      return [
-        `${domain} wants you to sign in with your Ethereum account:`,
+    (address: string, nonce: string, chainId: number): string =>
+      buildSiweMessage({
+        domain: window.location.host,
+        uri: window.location.origin,
         address,
-        "",
-        "Sign in to Web3 Battle Arena",
-        "",
-        `URI: ${uri}`,
-        `Version: 1`,
-        `Chain ID: ${chainId}`,
-        `Nonce: ${nonce}`,
-        `Issued At: ${now}`,
-      ].join("\n");
-    },
+        nonce,
+        chainId,
+      }),
     []
   );
 
@@ -64,7 +56,7 @@ export function useAuth() {
    * Returns the verified address on success.
    */
   const verify = useCallback(
-    async (message: string, signature: string): Promise<string> => {
+    async (message: string, signature: string, source: "wallet" | "dev" = "wallet"): Promise<string> => {
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
         const res = await fetch(`${SERVER}/api/auth/verify`, {
@@ -81,6 +73,7 @@ export function useAuth() {
         const address = json.data?.user?.address ?? json.data?.address ?? json.address;
         const sessionToken = json.data?.sessionToken;
         if (typeof window !== "undefined") {
+          localStorage.setItem("wba_auth_source", source);
           if (sessionToken) localStorage.setItem("wba_session_token", sessionToken);
           if (address) localStorage.setItem("wba_current_addr", address);
         }
@@ -98,17 +91,25 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null;
-    await fetch(`${SERVER}/api/auth/logout`, {
-      method: "POST",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      credentials: "include",
-    });
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("wba_session_token");
+    try {
+      await fetch(`${SERVER}/api/auth/logout`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+      });
+    } catch {
+      // Offline: still drop the local session below
+    } finally {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("wba_session_token");
+        localStorage.removeItem("wba_current_addr");
+        localStorage.removeItem("wba_auth_source");
+      }
+      disconnectSocket(); // the socket must not stay authenticated as the old user
+      setState({ address: null, loading: false, error: null });
     }
-    setState({ address: null, loading: false, error: null });
   }, []);
 
   const checkSession = useCallback(async () => {

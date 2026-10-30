@@ -88,7 +88,7 @@ export function LobbyClient() {
     try {
       if (!address) {
         setQueueMsg("Connecting tactical identity…");
-        const loggedInAddress = await login(false);
+        const loggedInAddress = await login();
         if (!loggedInAddress) {
           setQueueMsg("Authentication failed. Please try again.");
           return;
