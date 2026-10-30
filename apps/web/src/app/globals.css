@@ -315,3 +315,17 @@ button, a, input { transition-property: background-color, border-color, color, b
 .cell-impact-hit  { animation: cell-hit-pulse 1.4s ease-out both; z-index: 3; }
 .cell-impact-boom { animation: cell-boom-pulse 1.4s ease-out both; z-index: 3; }
 .cell-impact-miss { animation: cell-miss-ripple 0.9s ease-out both; }
+
+/* Match start splash */
+.match-banner { animation: match-banner-fade 2.8s ease both; }
+.match-banner-title { animation: match-banner-pop 0.7s cubic-bezier(.2,1.4,.4,1) both; }
+.match-banner-left { animation: match-banner-in-left 0.6s 0.35s ease-out both; }
+.match-banner-right { animation: match-banner-in-right 0.6s 0.35s ease-out both; }
+.match-banner-vs { animation: match-banner-pop 0.5s 0.7s cubic-bezier(.2,1.4,.4,1) both; }
+@keyframes match-banner-fade { 0%{opacity:0} 10%{opacity:1} 85%{opacity:1} 100%{opacity:0} }
+@keyframes match-banner-pop { 0%{transform:scale(.4);opacity:0} 100%{transform:scale(1);opacity:1} }
+@keyframes match-banner-in-left { 0%{transform:translateX(-80px);opacity:0} 100%{transform:none;opacity:1} }
+@keyframes match-banner-in-right { 0%{transform:translateX(80px);opacity:0} 100%{transform:none;opacity:1} }
+@media (prefers-reduced-motion: reduce) {
+  .match-banner-title, .match-banner-left, .match-banner-right, .match-banner-vs { animation-duration: 0.01s; animation-delay: 0s; }
+}

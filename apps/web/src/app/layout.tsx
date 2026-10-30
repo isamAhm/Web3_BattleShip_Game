@@ -4,6 +4,7 @@ import "./globals.css";
 import { Header } from "@/components/layout/Header";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { AuthProvider } from "@/lib/AuthContext";
+import { NicknameGate } from "@/components/layout/NicknameGate";
 
 const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
@@ -41,6 +42,7 @@ export default function RootLayout({
         <AuthProvider>
           <ThemeProvider>
             <Header />
+            <NicknameGate />
             {children}
           </ThemeProvider>
         </AuthProvider>

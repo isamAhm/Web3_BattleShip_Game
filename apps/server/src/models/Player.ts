@@ -12,6 +12,8 @@ export interface IPlayerStats {
 export interface IPlayer extends Document {
   address: string;
   username: string;
+  /** True once the player picked their own nickname (otherwise username is the generated default) */
+  nicknameSet?: boolean;
   avatar: string;
   stats: IPlayerStats;
   createdAt: Date;
@@ -44,6 +46,10 @@ const PlayerSchema = new Schema<IPlayer>(
       type: String,
       required: true,
       trim: true,
+    },
+    nicknameSet: {
+      type: Boolean,
+      default: false,
     },
     avatar: {
       type: String,

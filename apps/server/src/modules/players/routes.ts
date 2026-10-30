@@ -22,6 +22,35 @@ playersRouter.get('/:address', async (req: Request, res: Response, next: NextFun
   }
 });
 
+/** Nickname rules: 3-16 letters, digits or underscore; the generated Player_xxxxxx form is reserved. */
+const NICKNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
+const RESERVED_RE = /^player_[0-9a-f]{6}$/i;
+
+playersRouter.put('/me/nickname', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const nickname = typeof req.body?.nickname === 'string' ? req.body.nickname.trim() : '';
+    const fail = (status: number, code: string, message: string) =>
+      res.status(status).json({ success: false, error: { code, message } });
+
+    if (!NICKNAME_RE.test(nickname)) {
+      fail(400, 'INVALID_NICKNAME', 'Use 3-16 letters, numbers or underscores.');
+      return;
+    }
+    if (RESERVED_RE.test(nickname)) {
+      fail(400, 'INVALID_NICKNAME', 'That name format is reserved. Pick another one.');
+      return;
+    }
+    if (await playerRepo.isUsernameTaken(nickname, req.user!.address)) {
+      fail(409, 'NICKNAME_TAKEN', 'That nickname is already taken.');
+      return;
+    }
+    const updated = await playerRepo.setNickname(req.user!.address, nickname);
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 playersRouter.patch('/me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const data = updatePlayerProfileSchema.parse(req.body);

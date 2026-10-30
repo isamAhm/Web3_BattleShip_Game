@@ -19,6 +19,7 @@ import {
   type Hex,
 } from '@wba/engine';
 import { matchRepo } from '../repositories/matchRepo.js';
+import { playerRepo } from '../repositories/playerRepo.js';
 import { postMatchProcessor } from '../workers/postMatchWorker.js';
 
 /** How long a finished session stays in memory so players can still submit reveals. */
@@ -48,6 +49,8 @@ export class MatchSession {
   public disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   public ioEmitCallback: (room: string, event: string, data: any) => void;
   public onMatchEndCallback?: (matchId: string) => void;
+  /** address -> display name, filled shortly after creation (placement takes much longer) */
+  private names = new Map<string, string>();
 
   constructor(
     matchId: string,
@@ -63,6 +66,26 @@ export class MatchSession {
     this.roomCode = roomCode;
     this.ioEmitCallback = ioEmit;
     this.startPlacementTimer();
+    for (const addr of [player1, player2]) {
+      playerRepo
+        .getOrCreate(addr)
+        .then((p) => this.names.set(addr.toLowerCase(), p.username))
+        .catch(() => undefined);
+    }
+  }
+
+  /** Last messages of the spectators-only chat, replayed to spectators who join later. */
+  public spectatorChat: { sender: string; username: string; text: string; timestamp: number }[] = [];
+
+  public playerNames(): [string, string] {
+    return [
+      this.displayName(this.matchState.players[0].address),
+      this.displayName(this.matchState.players[1].address),
+    ];
+  }
+
+  private displayName(address: string): string {
+    return this.names.get(address) ?? `Player_${address.slice(2, 8)}`;
   }
 
   public get matchId(): string {
@@ -170,6 +193,10 @@ export class MatchSession {
         matchId: this.matchId,
         currentTurn: currentTurnAddress,
         turnDeadline: Date.now() + DEFAULT_CONFIG.turnSeconds * 1000,
+        players: this.matchState.players.map((p) => ({
+          address: p.address,
+          username: this.displayName(p.address),
+        })),
       });
       this.startTurnTimer();
     }

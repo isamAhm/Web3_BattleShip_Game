@@ -340,18 +340,43 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
     });
 
     // --- Spectate ---
+    // Spectators watch through the match room (shots, turns, results) and talk in their own
+    // chat room, which players never receive.
+    const spectating = new Set<string>();
+    const specRoom = (matchId: string) => `spectators:${matchId}`;
+    const leaveSpectating = (matchId: string) => {
+      if (!spectating.delete(matchId)) return;
+      const session = matchManager.getSession(matchId);
+      socket.leave(specRoom(matchId));
+      if (!session) return;
+      session.spectators.delete(socket.id);
+      socket.leave(session.roomCode);
+      io.to(specRoom(matchId)).emit('spectate:count', { count: session.spectators.size });
+    };
+
     socket.on('spectate:join', (payload) => {
       try {
         const { matchId } = spectateJoinPayloadSchema.parse(payload);
         const session = matchManager.getSession(matchId);
         if (!session) {
-          socket.emit('error', { message: 'Match not found' });
+          socket.emit('error', { message: 'Match not found', code: 'SPECTATE_NOT_FOUND' });
+          return;
+        }
+        if (session.getPlayerIndex(userAddress) !== null) {
+          socket.emit('error', { message: 'You are playing in this match', code: 'SPECTATE_IS_PLAYER' });
           return;
         }
 
         session.spectators.add(socket.id);
+        spectating.add(matchId);
         socket.join(session.roomCode);
-        socket.emit('spectate:view', session.getView('spectator'));
+        socket.join(specRoom(matchId));
+        socket.emit('spectate:view', {
+          ...session.getView('spectator'),
+          usernames: session.playerNames(),
+          chat: session.spectatorChat,
+        });
+        io.to(specRoom(matchId)).emit('spectate:count', { count: session.spectators.size });
       } catch (err: any) {
         socket.emit('error', { message: err.message });
       }
@@ -360,32 +385,49 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
     socket.on('spectate:leave', (payload) => {
       try {
         const { matchId } = spectateJoinPayloadSchema.parse(payload);
-        const session = matchManager.getSession(matchId);
-        if (session) {
-          session.spectators.delete(socket.id);
-          socket.leave(session.roomCode);
-        }
+        leaveSpectating(matchId);
       } catch (err: any) {
         socket.emit('error', { message: err.message });
       }
     });
 
-    // --- In-Game Chat ---
-    socket.on('chat:send', async (payload) => {
+    socket.on('spectator:chat:send', async (payload) => {
       try {
         const { matchId, text } = chatSendPayloadSchema.parse(payload);
+        if (!spectating.has(matchId)) return; // only current spectators of this match
         const session = matchManager.getSession(matchId);
         if (!session) return;
 
         const player = await playerRepo.findByAddress(userAddress);
-        const username = player?.username || `Player_${userAddress.slice(2, 8)}`;
-
-        io.to(session.roomCode).emit('chat:message', {
+        const message = {
           sender: userAddress,
-          username,
+          username: player?.username || `Player_${userAddress.slice(2, 8)}`,
           text,
           timestamp: Date.now(),
-        });
+        };
+        session.spectatorChat.push(message);
+        if (session.spectatorChat.length > 50) session.spectatorChat.shift();
+        io.to(specRoom(matchId)).emit('spectator:chat', message);
+      } catch (err: any) {
+        socket.emit('error', { message: err.message });
+      }
+    });
+
+    // --- In-Game Chat (players only) ---
+    socket.on('chat:send', async (payload) => {
+      try {
+        const { matchId, text } = chatSendPayloadSchema.parse(payload);
+        const session = matchManager.getSession(matchId);
+        if (!session || session.getPlayerIndex(userAddress) === null) return;
+
+        const player = await playerRepo.findByAddress(userAddress);
+        const username = player?.username || `Player_${userAddress.slice(2, 8)}`;
+        const message = { sender: userAddress, username, text, timestamp: Date.now() };
+
+        // Straight to the two players: spectators are in the match room but must not see this
+        for (const p of session.matchState.players) {
+          io.to(userRoom(p.address)).emit('chat:message', message);
+        }
       } catch (err: any) {
         socket.emit('error', { message: err.message });
       }
@@ -415,6 +457,7 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
 
     // --- Disconnect & Grace Period ---
     socket.on('disconnect', () => {
+      for (const matchId of [...spectating]) leaveSpectating(matchId);
       const ids = userSockets.get(userAddress);
       ids?.delete(socket.id);
       // Another socket for this address is still connected (new tab / reconnect overlap):

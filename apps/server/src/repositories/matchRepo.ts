@@ -161,6 +161,44 @@ export class MatchRepository {
     return m;
   }
 
+  /**
+   * Atomically marks a post-match step as started. Returns true for exactly one caller, so a
+   * retried or duplicated job cannot apply the same step twice.
+   */
+  public async claimStep(matchId: string, step: string): Promise<boolean> {
+    if (isMongoConnected()) {
+      try {
+        const res = await MatchModel.updateOne(
+          { matchId, [`postSteps.${step}`]: { $ne: true } },
+          { $set: { [`postSteps.${step}`]: true } },
+        );
+        return res.modifiedCount === 1;
+      } catch {
+        // fallback
+      }
+    }
+    const m = memoryStore.get(matchId);
+    if (!m) return false;
+    const steps = ((m as any).postSteps ??= {});
+    if (steps[step]) return false;
+    steps[step] = true;
+    return true;
+  }
+
+  /** Undoes claimStep after the step failed, so the next attempt can run it again. */
+  public async releaseStep(matchId: string, step: string): Promise<void> {
+    if (isMongoConnected()) {
+      try {
+        await MatchModel.updateOne({ matchId }, { $set: { [`postSteps.${step}`]: false } });
+        return;
+      } catch {
+        // fallback
+      }
+    }
+    const m = memoryStore.get(matchId) as any;
+    if (m?.postSteps) m.postSteps[step] = false;
+  }
+
   public async findByPlayer(address: string, limit = 20, offset = 0): Promise<IMatch[]> {
     const normalized = address.toLowerCase();
     if (isMongoConnected()) {

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ThemeSettings } from "@/components/settings/ThemeSettings";
+import { NicknameSettings } from "@/components/settings/NicknameSettings";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 
 export const metadata: Metadata = {
@@ -20,6 +21,14 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid gap-6">
+        {/* Profile */}
+        <SettingsSection
+          title="Profile"
+          description="Your nickname is shown to opponents in matches and on the leaderboard."
+        >
+          <NicknameSettings />
+        </SettingsSection>
+
         {/* Theme */}
         <SettingsSection
           title="Appearance"

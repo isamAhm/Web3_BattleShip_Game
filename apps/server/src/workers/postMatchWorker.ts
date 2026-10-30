@@ -121,23 +121,44 @@ export class PostMatchProcessor {
     const streak1 = shots1.reduce((m, s) => Math.max(m, s.shooterStreak), 0);
     const streak2 = shots2.reduce((m, s) => Math.max(m, s.shooterStreak), 0);
 
-    // 1. Update Player 1 Stats
-    const p1Updated = await playerRepo.updateStats(player1, {
-      isWin: winner?.toLowerCase() === player1,
+    // No winner (e.g. neither player placed a fleet): nothing to rank, reward or record.
+    if (!winner) {
+      console.log(`[PostMatchProcessor] Match ${matchId} has no winner, nothing to process`);
+      return;
+    }
+
+    // 1-2. Player stats. Increments are not idempotent, so each player's update is claimed
+    // first: a retried or duplicated job skips what already ran, and a failed update is
+    // released so the next attempt redoes exactly that one.
+    const applyStats = async (
+      step: string,
+      address: string,
+      update: { isWin: boolean; points: number; streak: number; shotsUsed: number },
+    ) => {
+      if (!(await matchRepo.claimStep(matchId, step))) {
+        return playerRepo.findByAddress(address); // already counted: just read the current stats
+      }
+      try {
+        return await playerRepo.updateStats(address, update);
+      } catch (err) {
+        await matchRepo.releaseStep(matchId, step);
+        throw err;
+      }
+    };
+    const p1Updated = await applyStats('stats0', player1, {
+      isWin: winner.toLowerCase() === player1,
       points: score1,
       streak: streak1,
       shotsUsed: shots1.length,
     });
-
-    // 2. Update Player 2 Stats
-    const p2Updated = await playerRepo.updateStats(player2, {
-      isWin: winner?.toLowerCase() === player2,
+    const p2Updated = await applyStats('stats1', player2, {
+      isWin: winner.toLowerCase() === player2,
       points: score2,
       streak: streak2,
       shotsUsed: shots2.length,
     });
 
-    // 3. Update Leaderboards
+    // 3. Update Leaderboards (sets absolute scores, so it is safe to repeat)
     if (p1Updated) {
       await leaderboardService.updatePlayerStats(player1, p1Updated.stats);
     }
@@ -172,36 +193,43 @@ export class PostMatchProcessor {
       await chainService.recordMatch(matchId, winner, resultHash);
     }
 
-    // 7. Update Tournament Standings if open tournaments exist
+    // 7. Update Tournament Standings. Points are added to the standings, so each tournament is
+    // claimed once per match (a failure releases only the tournament that failed).
     const openTournaments = await tournamentRepo.listTournaments('open');
     for (const tourn of openTournaments) {
-      const standingsMap = new Map<string, { points: number; wins: number }>();
-      tourn.standings.forEach((s) => {
-        standingsMap.set(s.address.toLowerCase(), { points: s.points, wins: s.wins });
-      });
-
-      const s1 = standingsMap.get(player1) ?? { points: 0, wins: 0 };
-      s1.points += Math.max(0, score1);
-      if (winner?.toLowerCase() === player1) s1.wins += 1;
-      standingsMap.set(player1, s1);
-
-      const s2 = standingsMap.get(player2) ?? { points: 0, wins: 0 };
-      s2.points += Math.max(0, score2);
-      if (winner?.toLowerCase() === player2) s2.wins += 1;
-      standingsMap.set(player2, s2);
-
-      const updatedList = Array.from(standingsMap.entries())
-        .map(([address, data]) => ({ address, points: data.points, wins: data.wins, rank: 1 }))
-        .sort((a, b) => {
-          if (b.points !== a.points) return b.points - a.points;
-          return b.wins - a.wins;
+      const step = `tournament_${tourn.tournamentId}`.replace(/[.$]/g, '_');
+      if (!(await matchRepo.claimStep(matchId, step))) continue;
+      try {
+        const standingsMap = new Map<string, { points: number; wins: number }>();
+        tourn.standings.forEach((s) => {
+          standingsMap.set(s.address.toLowerCase(), { points: s.points, wins: s.wins });
         });
 
-      updatedList.forEach((item, idx) => {
-        item.rank = idx + 1;
-      });
+        const s1 = standingsMap.get(player1) ?? { points: 0, wins: 0 };
+        s1.points += Math.max(0, score1);
+        if (winner.toLowerCase() === player1) s1.wins += 1;
+        standingsMap.set(player1, s1);
 
-      await tournamentRepo.updateStandings(tourn.tournamentId, updatedList);
+        const s2 = standingsMap.get(player2) ?? { points: 0, wins: 0 };
+        s2.points += Math.max(0, score2);
+        if (winner.toLowerCase() === player2) s2.wins += 1;
+        standingsMap.set(player2, s2);
+
+        const updatedList = Array.from(standingsMap.entries())
+          .map(([address, data]) => ({ address, points: data.points, wins: data.wins, rank: 1 }))
+          .sort((a, b) => {
+            if (b.points !== a.points) return b.points - a.points;
+            return b.wins - a.wins;
+          });
+        updatedList.forEach((item, idx) => {
+          item.rank = idx + 1;
+        });
+
+        await tournamentRepo.updateStandings(tourn.tournamentId, updatedList);
+      } catch (err) {
+        await matchRepo.releaseStep(matchId, step);
+        throw err;
+      }
     }
   }
 

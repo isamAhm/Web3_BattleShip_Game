@@ -34,13 +34,24 @@ export interface GameSocketCallbacks {
   onMatchStart?: (matchId: string, state: unknown) => void;
   onMatchRejoin?: (matchId: string, state: unknown) => void;
   onShotResult?: (result: ShotResult) => void;
-  onTurnTimer?: (player: string, seconds: number) => void;
+  /** The server (re)started the turn clock: whose turn it is and when it runs out (epoch ms). */
+  onTurnTimer?: (currentTurn: string, secondsRemaining: number, deadline?: number) => void;
+  /** Full viewer-specific match snapshot after a reconnect. */
+  onMatchRestore?: (view: any) => void;
+  /** Match changed without a shot (e.g. a turn timed out). */
+  onMatchUpdate?: (view: any) => void;
   onTurnTimeout?: (player: string) => void;
   onMatchEnd?: (payload: MatchEndPayload) => void;
   onMatchVerified?: (resultHash: string) => void;
   onRoomCreated?: (roomCode: string) => void;
-  onChatMessage?: (sender: string, text: string, ts: number) => void;
+  onChatMessage?: (sender: string, text: string, ts: number, username?: string) => void;
   onInvite?: (from: string) => void;
+  /** Snapshot sent to a spectator who joined: public view + player names + spectator chat history. */
+  onSpectateView?: (view: any) => void;
+  onSpectatorChat?: (msg: { sender: string; username: string; text: string; timestamp: number }) => void;
+  onSpectateCount?: (count: number) => void;
+  /** A socket error with its machine-readable code (if any). */
+  onErrorCode?: (code: string | undefined, message: string) => void;
   onError?: (msg: string) => void;
   /** The server refused a queue/room request because the player still has an unfinished match. */
   onActiveMatch?: (matchId: string) => void;
@@ -77,9 +88,9 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       cbRef.current.onMatchStart?.(matchId, payload);
     });
 
-    on("match:restore", (view: any) => {
-      cbRef.current.onMatchStart?.(view?.matchId, view);
-    });
+    on("match:restore", (view: any) => cbRef.current.onMatchRestore?.(view));
+
+    on("match:update", (view: any) => cbRef.current.onMatchUpdate?.(view));
 
     on("match:rejoin", (payload: any) =>
       cbRef.current.onMatchRejoin?.(payload?.matchId, payload));
@@ -113,8 +124,8 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       }
     });
 
-    on("turn:timer", ({ player, seconds }) =>
-      cbRef.current.onTurnTimer?.(player, seconds));
+    on("turn:timer", ({ currentTurn, secondsRemaining, deadline }) =>
+      cbRef.current.onTurnTimer?.(currentTurn, secondsRemaining, deadline));
 
     on("turn:timeout", ({ player }) =>
       cbRef.current.onTurnTimeout?.(player));
@@ -138,13 +149,18 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
       cbRef.current.onRoomCreated?.(code);
     });
 
-    on("chat:message", ({ sender, text, ts }) =>
-      cbRef.current.onChatMessage?.(sender, text, ts));
+    on("chat:message", ({ sender, text, timestamp, username }) =>
+      cbRef.current.onChatMessage?.(sender, text, timestamp, username));
 
     on("invite:received", ({ from }) =>
       cbRef.current.onInvite?.(from));
 
+    on("spectate:view", (view: any) => cbRef.current.onSpectateView?.(view));
+    on("spectator:chat", (msg: any) => cbRef.current.onSpectatorChat?.(msg));
+    on("spectate:count", ({ count }) => cbRef.current.onSpectateCount?.(count));
+
     on("error", (err: any) => {
+      cbRef.current.onErrorCode?.(err?.code, err?.message ?? String(err));
       if (err?.code === "ACTIVE_MATCH" && err?.matchId) {
         cbRef.current.onActiveMatch?.(err.matchId);
       }
@@ -287,6 +303,12 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     }, []
   );
 
+  const sendSpectatorChat = useCallback(
+    (matchId: string, text: string) => {
+      getSocket().emit("spectator:chat:send", { matchId, text });
+    }, []
+  );
+
   const sendInvite = useCallback(
     (to: string) => {
       getSocket().emit("invite:send", { to });
@@ -318,6 +340,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     sendChat,
     spectate,
     spectateLeave,
+    sendSpectatorChat,
     sendInvite,
     forfeitMatch,
   };

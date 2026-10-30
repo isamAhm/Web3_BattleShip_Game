@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, ReactNode, useCallback } from "react";
+import { createContext, useContext, useEffect, useRef, useState, ReactNode, useCallback } from "react";
+import { api } from "./api";
 import { useAuth, AuthState } from "./useAuth";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { getAddress } from "viem";
@@ -12,12 +13,42 @@ interface AuthContextValue extends AuthState {
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
   switchDevIdentity: () => Promise<string>;
+  /** The player's display name; null until the profile has loaded */
+  nickname: string | null;
+  /** False until the player has chosen their own nickname (null while unknown) */
+  nicknameSet: boolean | null;
+  saveNickname: (nickname: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
+  const [profile, setProfile] = useState<{ username: string; nicknameSet: boolean } | null>(null);
+
+  // Load the display name whenever the signed-in account changes
+  useEffect(() => {
+    if (!auth.address) {
+      setProfile(null);
+      return;
+    }
+    let live = true;
+    api
+      .me()
+      .then((res: any) => {
+        const player = res?.player;
+        if (live && player) setProfile({ username: player.username, nicknameSet: !!player.nicknameSet });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [auth.address]);
+
+  const saveNickname = useCallback(async (nickname: string) => {
+    const player = await api.setNickname(nickname);
+    setProfile({ username: player.username, nicknameSet: true });
+  }, []);
 
   useEffect(() => {
     auth.checkSession();
@@ -100,6 +131,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout: auth.logout,
         checkSession: auth.checkSession,
         switchDevIdentity,
+        nickname: profile?.username ?? null,
+        nicknameSet: profile ? profile.nicknameSet : null,
+        saveNickname,
       }}
     >
       {children}

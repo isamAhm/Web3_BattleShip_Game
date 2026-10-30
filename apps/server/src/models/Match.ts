@@ -33,6 +33,8 @@ export interface IMatch extends Document {
   };
   canonicalRecord?: any;
   resultHash?: string;
+  /** Post-match steps that already ran (stats0, stats1, tournaments): makes the job re-runnable. */
+  postSteps?: Record<string, boolean>;
   chainStatus: 'pending' | 'recorded' | 'failed';
   chainMode: 'simulated' | 'testnet';
   chainTxHash?: string;
@@ -114,6 +116,7 @@ const MatchSchema = new Schema<IMatch>(
       details: Schema.Types.Mixed,
     },
     canonicalRecord: Schema.Types.Mixed,
+    postSteps: { type: Schema.Types.Mixed, default: () => ({}) },
     resultHash: {
       type: String,
       index: true,

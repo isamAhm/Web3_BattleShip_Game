@@ -45,6 +45,7 @@ export class PlayerRepository {
     const newPlayerData = {
       address: normalized,
       username: defaultUsername,
+      nicknameSet: false,
       avatar: '',
       stats: {
         matchesPlayed: 0,
@@ -69,6 +70,47 @@ export class PlayerRepository {
     const mockDoc = { ...newPlayerData } as unknown as IPlayer;
     memoryStore.set(normalized, mockDoc);
     return mockDoc;
+  }
+
+  /** Case-insensitive check; the player's own current name does not count as taken. */
+  public async isUsernameTaken(username: string, exceptAddress: string): Promise<boolean> {
+    const except = exceptAddress.toLowerCase();
+    const wanted = username.toLowerCase();
+    if (isMongoConnected()) {
+      try {
+        const escaped = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hit = await PlayerModel.findOne({
+          username: new RegExp(`^${escaped}$`, 'i'),
+          address: { $ne: except },
+        });
+        return !!hit;
+      } catch {
+        // fallback to memory
+      }
+    }
+    return memoryStore.list().some((p) => p.username.toLowerCase() === wanted && p.address !== except);
+  }
+
+  /** Records a player-chosen nickname. */
+  public async setNickname(address: string, username: string): Promise<IPlayer | null> {
+    const normalized = address.toLowerCase();
+    await this.getOrCreate(normalized);
+    if (isMongoConnected()) {
+      try {
+        return await PlayerModel.findOneAndUpdate(
+          { address: normalized },
+          { $set: { username, nicknameSet: true } },
+          { new: true },
+        );
+      } catch {
+        // fallback
+      }
+    }
+    const p = memoryStore.get(normalized)!;
+    p.username = username;
+    p.nicknameSet = true;
+    p.updatedAt = new Date();
+    return p;
   }
 
   public async updateProfile(

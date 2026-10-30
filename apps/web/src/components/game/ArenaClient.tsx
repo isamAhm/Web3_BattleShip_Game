@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { commitPlacement, generateSalt } from "@wba/engine";
+import { commitPlacement, generateSalt, DEFAULT_CONFIG } from "@wba/engine";
 import { GameBoard } from "./GameBoard";
 import { PlayerPanel } from "./PlayerPanel";
 import { OpponentPanel } from "./OpponentPanel";
@@ -14,6 +14,9 @@ import { ShotAnimation, SHOT_FLIGHT_MS } from "./ShotAnimation";
 import { WreckEffects, type Wreck } from "./WreckEffects";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
+import { api } from "@/lib/api";
+import { MatchStartBanner } from "./MatchStartBanner";
+import { SpectatorArena } from "./SpectatorArena";
 import { useNavigationGuard, clearActiveMatch } from "@/lib/useNavigationGuard";
 import type {
   BoardCells,
@@ -115,11 +118,12 @@ function generateRandomFleet(): { ships: PlacedShip[]; mines: string[] } {
 /** Pending "player left the arena" forfeits, keyed by matchId (cancelled if the arena remounts). */
 const pendingLeaveForfeits = new Map<string, ReturnType<typeof setTimeout>>();
 
-export function ArenaClient() {
+function PlayerArena() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const matchIdParam = searchParams.get("match");
-  const { address } = useAuthCtx();
+  const { address, nickname } = useAuthCtx();
+  const [matchBanner, setMatchBanner] = useState<{ you: string; opponent: string } | null>(null);
 
   // Phase: placement -> battle -> ended
   const [phase, setPhase] = useState<"placement" | "battle" | "ended">("placement");
@@ -169,42 +173,49 @@ export function ArenaClient() {
 
   // Match State
   const [isMyTurn, setIsMyTurn] = useState(true);
-  const [timerSecs, setTimerSecs] = useState(30);
+  const TURN_SECONDS = matchIdParam ? DEFAULT_CONFIG.turnSeconds : 30;
+  const [timerSecs, setTimerSecs] = useState(TURN_SECONDS);
+  // When the server's turn clock runs out (epoch ms), multiplayer only
+  const turnDeadlineRef = useRef<number | null>(null);
+  // When the missile of the latest shot lands: state that depends on it waits until then
+  const shotImpactAtRef = useRef(0);
   const [inQueue, setInQueue] = useState(false);
 
   // Chat
-  const [chatMessages, setChatMessages] = useState<{ sender: string; text: string }[]>([
-    { sender: "Command", text: "Fleet positioned. Ready weapons systems." },
-    { sender: "AI Opponent", text: "Tactical grid active. Good luck, Commander." },
-  ]);
+  const [chatMessages, setChatMessages] = useState<{ sender: string; text: string }[]>(
+    matchIdParam
+      ? [{ sender: "Command", text: "Secure channel open. Chat with your opponent here." }]
+      : [
+          { sender: "Command", text: "Fleet positioned. Ready weapons systems." },
+          { sender: "AI Opponent", text: "Tactical grid active. Good luck, Commander." },
+        ]
+  );
   const [chatInput, setChatInput] = useState("");
   const [showForfeitConfirm, setShowForfeitConfirm] = useState(false);
-  const [isSpectator, setIsSpectator] = useState(false);
   const [showVictoryModal, setShowVictoryModal] = useState(false);
   const [victoryModalData, setVictoryModalData] = useState<{ title: string; message: string; type: "win" | "lose" } | null>(null);
 
   // Turn Countdown
   useEffect(() => {
     if (phase !== "battle") return;
+    if (matchIdParam) {
+      // Multiplayer: show what the server's clock says, so the countdown never drifts
+      const t = setInterval(() => {
+        const deadline = turnDeadlineRef.current;
+        if (deadline) setTimerSecs(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+      }, 250);
+      return () => clearInterval(t);
+    }
     const t = setInterval(() => setTimerSecs((s) => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
-  }, [phase, isMyTurn]);
+  }, [phase, isMyTurn, matchIdParam]);
 
-  // Detect if user is spectating: if they have matchIdParam but never entered placement phase
-  useEffect(() => {
-    if (matchIdParam && phase === "battle") {
-      // Check if user went through placement for this match
-      // If they're already in battle phase on component mount, they're likely spectating
-      const hasPlacedFleet = playerShips.length === 5 && playerMines.length === 3;
-      if (!hasPlacedFleet) {
-        setIsSpectator(true);
-        setStatusMsg("👁 Spectating match · Watch only mode");
-      }
-    }
-  }, [matchIdParam, phase, playerShips.length, playerMines.length]);
-
-  const [opponentName, setOpponentName] = useState("AI Tactical Bot");
-  const [opponentAddr, setOpponentAddr] = useState("0x90F8…c9C1");
+  const [opponentName, setOpponentName] = useState(matchIdParam ? "Opponent" : "AI Tactical Bot");
+  const [opponentAddr, setOpponentAddr] = useState(matchIdParam ? "" : "0x90F8…c9C1");
+  // Real win counts in multiplayer (AI practice keeps its demo numbers)
+  const [myWins, setMyWins] = useState<number | null>(null);
+  const [opponentWins, setOpponentWins] = useState<number | null>(null);
+  const [enemySunkCount, setEnemySunkCount] = useState(0);
   const revealStateRef = useRef<{ salt: `0x${string}`; ships: any[]; mines: any[] } | null>(null);
   // Shot animation state
   const enemyBoardRef = useRef<HTMLDivElement | null>(null);
@@ -226,8 +237,114 @@ export function ArenaClient() {
   const addWreck = (set: React.Dispatch<React.SetStateAction<Wreck[]>>, cells: string[]) =>
     set((prev) => [...prev, { id: `${cells.join("|")}@${Date.now()}`, cells, t0: Date.now() }]);
 
+  /**
+   * Rebuilds the arena from the server's snapshot of the match: the real opponent, scores, both
+   * boards and whose turn it is. Used on arrival and after a reconnect / page reload.
+   */
+  const hydrateFromView = (view: any) => {
+    if (!view?.players || view.you === null || view.you === undefined) return;
+    const you: 0 | 1 = view.you;
+    const me = view.players[you];
+    const opp = view.players[you === 0 ? 1 : 0];
+
+    setOpponentAddr(opp.address);
+    setOpponentName(`Commander ${opp.address.slice(0, 6)}`);
+    api.player(opp.address).then((pl: any) => {
+      if (pl?.username) setOpponentName(pl.username);
+      setOpponentWins(pl?.stats?.wins ?? 0);
+    }).catch(() => {});
+    api.player(me.address).then((pl: any) => setMyWins(pl?.stats?.wins ?? 0)).catch(() => {});
+
+    // Still placing: nothing else to restore unless the fleet is already locked in
+    if (view.phase === "placement" && !me.placed) return;
+
+    setPlayerScore(me.score);
+    setPlayerStreak(me.streak);
+    setEnemyScore(opp.score);
+    setEnemyStreak(opp.streak);
+
+    const mine: BoardCells = {};
+    const foe: BoardCells = {};
+    for (const sh of view.shots ?? []) {
+      if (sh.outcome === "timeout") continue;
+      const key = `${sh.y},${sh.x}`;
+      const state = (sh.outcome === "mine" ? "boom" : sh.outcome) as any;
+      if (sh.player === you) foe[key] = state;
+      else mine[key] = state;
+    }
+
+    if (view.ownBoard) {
+      const used = new Set<string>();
+      const placed: PlacedShip[] = view.ownBoard.ships.map((sh: any) => {
+        const cells = Array.from({ length: sh.length }, (_, i) =>
+          sh.orientation === "H" ? `${sh.y},${sh.x + i}` : `${sh.y + i},${sh.x}`
+        );
+        const def =
+          SHIP_DEFS.find((d) => d.size === sh.length && !used.has(d.type)) ??
+          SHIP_DEFS.find((d) => d.size === sh.length)!;
+        used.add(def.type);
+        const hits = cells.filter((k) => mine[k] === "hit" || mine[k] === "sunk").length;
+        if (hits >= sh.length) cells.forEach((k) => (mine[k] = "sunk"));
+        return {
+          type: def.type,
+          name: def.name,
+          size: sh.length,
+          row: sh.y,
+          col: sh.x,
+          vertical: sh.orientation === "V",
+          cells,
+          hits,
+          wreck: hits >= sh.length,
+        };
+      });
+      setPlayerShips(placed);
+      setPlayerMines(view.ownBoard.mines.map((m: any) => `${m.y},${m.x}`));
+    }
+    setShotLog(
+      (view.shots ?? [])
+        .filter((sh: any) => sh.outcome !== "timeout")
+        .map((sh: any) => ({
+          cell: `${LETTERS[sh.y] ?? "A"}${sh.x + 1}`,
+          actor: sh.player === you ? "you" : "opponent",
+          result: sh.outcome,
+        }))
+        .reverse()
+    );
+    setMyBoardCells(mine);
+    setFoeCells(foe);
+    setEnemySunkCount((view.sunkShips?.[you === 0 ? 1 : 0] ?? []).length);
+
+    if (view.phase === "placement") {
+      setPlacementReady(false);
+      setStatusMsg("Fleet locked in. Waiting for the opponent to deploy…");
+    } else if (view.phase === "battle") {
+      setPhase("battle");
+      const myTurn = view.turn === you;
+      setIsMyTurn(myTurn);
+      setStatusMsg(myTurn ? "Reconnected. Your turn to fire." : "Reconnected. Opponent is taking aim…");
+    } else if (view.phase === "finished") {
+      setPhase("ended");
+    }
+  };
+
+  // First arrival (and reload): ask the server who the opponent is and what the match looks like
+  useEffect(() => {
+    if (!matchIdParam) return;
+    let cancelled = false;
+    api
+      .matchView(matchIdParam)
+      .then((view) => {
+        if (!cancelled) hydrateFromView(view);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchIdParam]);
+
   // Live Socket Hooks (for Multiplayer Match)
-  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, forfeitMatch, spectateLeave } = useGameSocket({
+  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, forfeitMatch } = useGameSocket({
     onMatchFound: (matchId, opponent) => {
       setInQueue(false);
       setOpponentName(`Commander ${opponent.slice(0, 6)}`);
@@ -236,10 +353,19 @@ export function ArenaClient() {
     },
     onMatchStart: (_matchId, state: any) => {
       setPhase("battle");
+      const named = (state?.players ?? []) as { address: string; username: string }[];
+      const mine = named.find((p) => address && p.address.toLowerCase() === address.toLowerCase());
+      const theirs = named.find((p) => p !== mine);
+      if (mine && theirs) {
+        setOpponentName(theirs.username);
+        setMatchBanner({ you: mine.username, opponent: theirs.username });
+      }
       const currentTurn = state?.currentTurn;
       const isMe = currentTurn && address ? currentTurn.toLowerCase() === address.toLowerCase() : true;
       setIsMyTurn(isMe);
-      setTimerSecs(30);
+      const deadline = typeof state?.turnDeadline === "number" ? state.turnDeadline : null;
+      turnDeadlineRef.current = deadline;
+      setTimerSecs(deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : TURN_SECONDS);
       setStatusMsg(isMe ? "⚔️ Battle started! Commander, your turn to fire." : "⚔️ Battle started! Opponent fires first.");
     },
     onShotResult: (result) => {
@@ -252,6 +378,7 @@ export function ArenaClient() {
       const sunkKeys = result.sunkShip ? result.sunkShip.cells.map((c) => `${c.y},${c.x}`) : [];
 
       // 1. Launch the missile now; everything visible on the boards changes when it lands
+      shotImpactAtRef.current = Date.now() + SHOT_FLIGHT_MS;
       lastShotLandRef.current = Date.now() + SHOT_FLIGHT_MS + 1500;
       if (isMe) {
         setAnimTarget(key);
@@ -362,7 +489,6 @@ export function ArenaClient() {
         if (result.nextTurn) {
           const isNowMyTurn = address ? result.nextTurn.toLowerCase() === address.toLowerCase() : false;
           setIsMyTurn(isNowMyTurn);
-          setTimerSecs(30);
           setStatusMsg(isNowMyTurn ? `Your turn! Select target coordinates.` : `Opponent's turn to fire...`);
         }
       };
@@ -398,6 +524,14 @@ export function ArenaClient() {
         bannerText = won
           ? "🏆 VICTORY! ENEMY FLEET ANNIHILATED!"
           : "💥 DEFEAT! ALL FRIENDLY VESSELS SUNK!";
+        if (won) {
+          setVictoryModalData({
+            title: "🏆 Victory!",
+            message: `You sank ${opponentName}'s entire fleet. Well fought, Commander!`,
+            type: "win",
+          });
+          setShowVictoryModal(true);
+        }
       }
 
       setBannerAlert({
@@ -427,8 +561,34 @@ export function ArenaClient() {
       if (wait > 0) setTimeout(run, wait);
       else run();
     },
-    onChatMessage: (sender, text) => {
-      setChatMessages((prev) => [...prev, { sender: sender.slice(0, 8) + "…", text }]);
+    onChatMessage: (sender, text, _ts, username) => {
+      const mine = address ? sender.toLowerCase() === address.toLowerCase() : false;
+      setChatMessages((prev) => [
+        ...prev,
+        { sender: mine ? "You" : (username ?? sender.slice(0, 8) + "…"), text },
+      ]);
+    },
+    onTurnTimer: (currentTurn, seconds, deadline) => {
+      // The server restarted the turn clock (after a shot, or after a turn timed out)
+      const apply = () => {
+        const mine = address ? currentTurn.toLowerCase() === address.toLowerCase() : false;
+        turnDeadlineRef.current = deadline ?? Date.now() + seconds * 1000;
+        setTimerSecs(seconds);
+        setIsMyTurn(mine);
+        setStatusMsg(mine ? "Your turn! Select target coordinates." : "Opponent's turn to fire...");
+      };
+      const wait = Math.max(0, shotImpactAtRef.current - Date.now());
+      if (wait > 0) setTimeout(apply, wait);
+      else apply();
+    },
+    onMatchRestore: (view) => hydrateFromView(view),
+    onMatchUpdate: (view) => {
+      // A turn timed out: the server skipped it and the turn passes (turn:timer follows)
+      const last = view?.shots?.[view.shots.length - 1];
+      if (last?.outcome === "timeout") {
+        const mine = view.you !== null && view.you !== undefined ? last.player === view.you : false;
+        setStatusMsg(mine ? "You ran out of time. Turn skipped." : "Opponent ran out of time. Turn skipped.");
+      }
     },
     onForfeitNotice: (message) => setStatusMsg(message),
     onError: (msg) => setStatusMsg(`Error: ${msg}`),
@@ -439,8 +599,6 @@ export function ArenaClient() {
   // remounts from forfeiting; a remount for the same match cancels the pending forfeit.
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
-  const spectatorRef = useRef(isSpectator);
-  spectatorRef.current = isSpectator;
   const forfeitMatchRef = useRef(forfeitMatch);
   forfeitMatchRef.current = forfeitMatch;
   // Remember the match for the lifetime of this component: the URL param can briefly vanish
@@ -458,7 +616,7 @@ export function ArenaClient() {
     }
     return () => {
       const id = joinedMatchRef.current;
-      if (!id || phaseRef.current === "ended" || spectatorRef.current) return;
+      if (!id || phaseRef.current === "ended") return;
       const timer = setTimeout(() => {
         pendingLeaveForfeits.delete(id);
         forfeitMatchRef.current(id);
@@ -485,9 +643,9 @@ export function ArenaClient() {
 
   // Calculate opponent fleet counts
   const opponentShipsLeft = useMemo(() => {
-    if (matchIdParam) return Math.max(0, 5 - revealedEnemyShips.length);
+    if (matchIdParam) return Math.max(0, 5 - Math.max(revealedEnemyShips.length, enemySunkCount));
     return enemyShips.filter((s) => s.hits < s.size).length;
-  }, [enemyShips, revealedEnemyShips, matchIdParam]);
+  }, [enemyShips, revealedEnemyShips, enemySunkCount, matchIdParam]);
 
   const playerShipsLeft = useMemo(() => {
     return playerShips.filter((s) => s.hits < s.size).length;
@@ -498,15 +656,15 @@ export function ArenaClient() {
     const pips = [false, false, false, false, false].map((_, i) => i < playerStreak);
     const mult = playerStreak >= 4 ? "×2.5" : playerStreak >= 2 ? "×1.75" : "×1.0";
     return {
-      name: "Commander",
+      name: nickname ?? "Commander",
       address: address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "0xDev…Test",
       score: playerScore,
-      wins: 14,
+      wins: matchIdParam ? (myWins ?? 0) : 14,
       streak: playerStreak,
       streakMultiplier: mult,
       streakPips: pips,
     };
-  }, [address, playerScore, playerStreak]);
+  }, [address, nickname, playerScore, playerStreak, matchIdParam, myWins]);
 
   // Opponent object for OpponentPanel
   const opponentObj: Player = useMemo(() => {
@@ -514,14 +672,18 @@ export function ArenaClient() {
     const mult = enemyStreak >= 2 ? "×1.5" : "×1.0";
     return {
       name: opponentName,
-      address: opponentAddr ? `${opponentAddr.slice(0, 6)}…${opponentAddr.slice(-4)}` : "0x90F8…c9C1",
+      address: opponentAddr
+        ? `${opponentAddr.slice(0, 6)}…${opponentAddr.slice(-4)}`
+        : matchIdParam
+          ? "—"
+          : "0x90F8…c9C1",
       score: enemyScore,
-      wins: 11,
+      wins: matchIdParam ? (opponentWins ?? 0) : 11,
       streak: enemyStreak,
       streakMultiplier: mult,
       streakPips: pips,
     };
-  }, [opponentName, opponentAddr, enemyScore, enemyStreak]);
+  }, [opponentName, opponentAddr, enemyScore, enemyStreak, matchIdParam, opponentWins]);
 
   // Ships formatted for GameBoard component
   const playerBoardShips: Ship[] = useMemo(() => {
@@ -954,6 +1116,15 @@ export function ArenaClient() {
             setPhase("ended");
             setBannerAlert({ type: "win", text: "🏆 VICTORY! ALL ENEMY SHIPS DESTROYED!" });
             setStatusMsg("🏆 VICTORY! Commander, you annihilated the enemy fleet!");
+            // Let the last ship burn for a moment before the result pops up
+            setTimeout(() => {
+              setVictoryModalData({
+                title: "🏆 Victory!",
+                message: "You destroyed the AI's entire fleet. Well fought, Commander!",
+                type: "win",
+              });
+              setShowVictoryModal(true);
+            }, 1500);
             return;
           }
         } else {
@@ -1166,8 +1337,14 @@ export function ArenaClient() {
   };
 
   const handleSendChat = () => {
-    if (!chatInput.trim()) return;
-    setChatMessages((prev) => [...prev, { sender: "You", text: chatInput.trim() }]);
+    const text = chatInput.trim();
+    if (!text) return;
+    if (matchIdParam) {
+      // Multiplayer: the server broadcasts it back to the room, which is what we display
+      sendChat(matchIdParam, text);
+    } else {
+      setChatMessages((prev) => [...prev, { sender: "You", text }]);
+    }
     setChatInput("");
   };
 
@@ -1221,10 +1398,13 @@ export function ArenaClient() {
     },
   });
 
-  const pct = `${Math.round((timerSecs / 30) * 100)}%`;
+  const pct = `${Math.round((timerSecs / TURN_SECONDS) * 100)}%`;
 
   return (
     <main className="max-w-[1440px] mx-auto px-8 py-7 pb-14">
+      {matchBanner && (
+        <MatchStartBanner you={matchBanner.you} opponent={matchBanner.opponent} onDone={() => setMatchBanner(null)} />
+      )}
       {/* 3-Column Arena Layout */}
       <div
         className="arena-grid grid gap-5 items-start"
@@ -1263,21 +1443,6 @@ export function ArenaClient() {
               <span>{bannerAlert.text}</span>
               {phase === "ended" && (
                 <div className="flex items-center gap-2">
-                  {isSpectator ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (matchIdParam) {
-                          spectateLeave(matchIdParam);
-                        }
-                        router.push("/play");
-                      }}
-                      className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105 border border-[var(--line)]"
-                      style={{ background: "rgba(235,181,74,.15)", color: "var(--brass)" }}
-                    >
-                      ← Leave Room
-                    </button>
-                  ) : (
                     <>
                       <button
                         type="button"
@@ -1305,7 +1470,6 @@ export function ArenaClient() {
                         Return to Lobby →
                       </button>
                     </>
-                  )}
                 </div>
               )}
             </div>
@@ -1335,7 +1499,9 @@ export function ArenaClient() {
               <p className="text-[var(--mist)] text-[14px] mt-0.5">
                 {phase === "placement"
                   ? "Position your 5 vessels and tactical mines before engaging the hostile fleet."
-                  : `Engaged vs AI Opponent · ${isMyTurn ? "Your turn to strike" : "AI calculating counter-fire"}`}
+                  : matchIdParam
+                    ? `Engaged vs ${opponentName} · ${isMyTurn ? "Your turn to strike" : "Opponent is taking aim"}`
+                    : `Engaged vs AI Opponent · ${isMyTurn ? "Your turn to strike" : "AI calculating counter-fire"}`}
               </p>
             </div>
 
@@ -1360,25 +1526,6 @@ export function ArenaClient() {
                     <span className="text-[var(--mist)] text-[11px]">sec remaining</span>
                   </div>
                 </div>
-                {isSpectator ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (matchIdParam) {
-                        spectateLeave(matchIdParam);
-                      }
-                      router.push("/play");
-                    }}
-                    className="px-4 py-2 rounded-[10px] text-[13px] font-bold border transition-all hover:-translate-y-px hover:border-[var(--brass)]"
-                    style={{
-                      background: "rgba(235,181,74,0.08)",
-                      borderColor: "rgba(235,181,74,0.3)",
-                      color: "var(--brass)",
-                    }}
-                  >
-                    ← Leave Room
-                  </button>
-                ) : (
                   <button
                     type="button"
                     onClick={() => setShowForfeitConfirm(true)}
@@ -1391,7 +1538,6 @@ export function ArenaClient() {
                   >
                     End Game
                   </button>
-                )}
               </>
             )}
           </div>
@@ -1844,4 +1990,12 @@ export function ArenaClient() {
       )}
     </main>
   );
+}
+
+/** `/arena?match=<id>&spectate=true` is the watch-only view; everything else is the player arena. */
+export function ArenaClient() {
+  const searchParams = useSearchParams();
+  const matchId = searchParams.get("match");
+  if (matchId && searchParams.get("spectate") === "true") return <SpectatorArena matchId={matchId} />;
+  return <PlayerArena />;
 }

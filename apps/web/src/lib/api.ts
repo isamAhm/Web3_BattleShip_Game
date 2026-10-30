@@ -34,6 +34,8 @@ export const api = {
     }),
   me: () => apiFetch<{ address: string; player?: any }>("/api/auth/me"),
   logout: () => apiFetch("/api/auth/logout", { method: "POST" }),
+  setNickname: (nickname: string) =>
+    apiFetch<any>("/api/players/me/nickname", { method: "PUT", body: JSON.stringify({ nickname }) }),
 
   // Leaderboard
   leaderboard: async (board: "points" | "streak" | "fastest") => {
@@ -121,6 +123,9 @@ export const api = {
     create: (data: any) =>
       apiFetch<any>("/api/tournaments", { method: "POST", body: JSON.stringify(data) }),
   },
+
+  /** Viewer-specific snapshot of a live match (own board only), or the stored record once it is over. */
+  matchView: (matchId: string) => apiFetch<any>(`/api/matches/${matchId}`),
 
   // Players
   player: (address: string) =>
