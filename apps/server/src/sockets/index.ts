@@ -348,6 +348,19 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
       }
     });
 
+    socket.on('spectate:leave', (payload) => {
+      try {
+        const { matchId } = spectateJoinPayloadSchema.parse(payload);
+        const session = matchManager.getSession(matchId);
+        if (session) {
+          session.spectators.delete(socket.id);
+          socket.leave(session.roomCode);
+        }
+      } catch (err: any) {
+        socket.emit('error', { message: err.message });
+      }
+    });
+
     // --- In-Game Chat ---
     socket.on('chat:send', async (payload) => {
       try {

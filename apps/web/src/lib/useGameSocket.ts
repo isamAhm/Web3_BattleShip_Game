@@ -282,6 +282,12 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     }, []
   );
 
+  const spectateLeave = useCallback(
+    (matchId: string) => {
+      getSocket().emit("spectate:leave", { matchId });
+    }, []
+  );
+
   const sendInvite = useCallback(
     (to: string) => {
       getSocket().emit("invite:send", { to });
@@ -304,6 +310,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
     submitReveal,
     sendChat,
     spectate,
+    spectateLeave,
     sendInvite,
     forfeitMatch,
   };

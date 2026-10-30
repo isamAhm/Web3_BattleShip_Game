@@ -175,6 +175,9 @@ export function ArenaClient() {
   ]);
   const [chatInput, setChatInput] = useState("");
   const [showForfeitConfirm, setShowForfeitConfirm] = useState(false);
+  const [isSpectator, setIsSpectator] = useState(false);
+  const [showVictoryModal, setShowVictoryModal] = useState(false);
+  const [victoryModalData, setVictoryModalData] = useState<{ title: string; message: string; type: "win" | "lose" } | null>(null);
 
   // Turn Countdown
   useEffect(() => {
@@ -182,6 +185,19 @@ export function ArenaClient() {
     const t = setInterval(() => setTimerSecs((s) => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
   }, [phase, isMyTurn]);
+
+  // Detect if user is spectating: if they have matchIdParam but never entered placement phase
+  useEffect(() => {
+    if (matchIdParam && phase === "battle") {
+      // Check if user went through placement for this match
+      // If they're already in battle phase on component mount, they're likely spectating
+      const hasPlacedFleet = playerShips.length === 5 && playerMines.length === 3;
+      if (!hasPlacedFleet) {
+        setIsSpectator(true);
+        setStatusMsg("👁 Spectating match · Watch only mode");
+      }
+    }
+  }, [matchIdParam, phase, playerShips.length, playerMines.length]);
 
   const [opponentName, setOpponentName] = useState("AI Tactical Bot");
   const [opponentAddr, setOpponentAddr] = useState("0x90F8…c9C1");
@@ -194,7 +210,7 @@ export function ArenaClient() {
   const [newlySunkCells, setNewlySunkCells] = useState<string[]>([]);
 
   // Live Socket Hooks (for Multiplayer Match)
-  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, forfeitMatch } = useGameSocket({
+  const { joinQueue, leaveQueue, fireShot, submitPlacement, submitReveal, sendChat, forfeitMatch, spectateLeave } = useGameSocket({
     onMatchFound: (matchId, opponent) => {
       setInQueue(false);
       setOpponentName(`Commander ${opponent.slice(0, 6)}`);
@@ -287,6 +303,13 @@ export function ArenaClient() {
           bannerText = "🏳️ MATCH CONCEDED · SURRENDER RECORDED";
         } else {
           bannerText = "🏆 VICTORY BY FORFEIT! OPPONENT SURRENDERED!";
+          // Show victory modal for opponent forfeit
+          setVictoryModalData({
+            title: "🏆 Victory by Forfeit!",
+            message: "Your opponent has surrendered the match. Victory is yours, Commander!",
+            type: "win"
+          });
+          setShowVictoryModal(true);
         }
       } else {
         bannerText = won
@@ -1085,17 +1108,45 @@ export function ArenaClient() {
             >
               <span>{bannerAlert.text}</span>
               {phase === "ended" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleRandomizePlacement();
-                    setPhase("placement");
-                  }}
-                  className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105"
-                  style={{ background: "var(--signal)", color: "var(--abyss)" }}
-                >
-                  Play Again
-                </button>
+                <div className="flex items-center gap-2">
+                  {isSpectator ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (matchIdParam) {
+                          spectateLeave(matchIdParam);
+                        }
+                        router.push("/play");
+                      }}
+                      className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105 border border-[var(--line)]"
+                      style={{ background: "rgba(235,181,74,.15)", color: "var(--brass)" }}
+                    >
+                      ← Leave Room
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleRandomizePlacement();
+                          setPhase("placement");
+                        }}
+                        className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105"
+                        style={{ background: "var(--signal)", color: "var(--abyss)" }}
+                      >
+                        🔄 Play Again
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => router.push("/play")}
+                        className="px-4 py-1.5 rounded-[10px] text-[13px] font-bold uppercase transition-transform hover:scale-105 border border-[var(--line)]"
+                        style={{ background: "rgba(19,48,59,.8)", color: "var(--foam)" }}
+                      >
+                        Return to Lobby →
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -1149,18 +1200,38 @@ export function ArenaClient() {
                     <span className="text-[var(--mist)] text-[11px]">sec remaining</span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowForfeitConfirm(true)}
-                  className="px-4 py-2 rounded-[10px] text-[13px] font-bold border transition-all hover:-translate-y-px hover:border-[var(--flare)]"
-                  style={{
-                    background: "rgba(255,106,77,0.08)",
-                    borderColor: "rgba(255,106,77,0.3)",
-                    color: "var(--flare)",
-                  }}
-                >
-                  End Game
-                </button>
+                {isSpectator ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (matchIdParam) {
+                        spectateLeave(matchIdParam);
+                      }
+                      router.push("/play");
+                    }}
+                    className="px-4 py-2 rounded-[10px] text-[13px] font-bold border transition-all hover:-translate-y-px hover:border-[var(--brass)]"
+                    style={{
+                      background: "rgba(235,181,74,0.08)",
+                      borderColor: "rgba(235,181,74,0.3)",
+                      color: "var(--brass)",
+                    }}
+                  >
+                    ← Leave Room
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowForfeitConfirm(true)}
+                    className="px-4 py-2 rounded-[10px] text-[13px] font-bold border transition-all hover:-translate-y-px hover:border-[var(--flare)]"
+                    style={{
+                      background: "rgba(255,106,77,0.08)",
+                      borderColor: "rgba(255,106,77,0.3)",
+                      color: "var(--flare)",
+                    }}
+                  >
+                    End Game
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -1527,6 +1598,74 @@ export function ArenaClient() {
                 End Game & Forfeit
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Victory/Defeat Modal */}
+      {showVictoryModal && victoryModalData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)" }}
+          onClick={() => setShowVictoryModal(false)}
+        >
+          <div
+            className="max-w-md w-full rounded-[20px] border p-8 text-center"
+            style={{
+              background: "linear-gradient(180deg, rgba(19,48,59,0.98), rgba(12,34,43,1))",
+              borderColor: victoryModalData.type === "win" ? "rgba(53,214,192,0.5)" : "rgba(255,106,77,0.5)",
+              boxShadow: victoryModalData.type === "win"
+                ? "0 0 40px rgba(53,214,192,0.2)"
+                : "0 0 40px rgba(255,106,77,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center text-4xl"
+              style={{
+                background: victoryModalData.type === "win"
+                  ? "linear-gradient(135deg, rgba(53,214,192,0.2), rgba(53,214,192,0.1))"
+                  : "linear-gradient(135deg, rgba(255,106,77,0.2), rgba(255,106,77,0.1))",
+                border: victoryModalData.type === "win"
+                  ? "3px solid var(--signal)"
+                  : "3px solid var(--flare)",
+              }}
+            >
+              {victoryModalData.type === "win" ? "🏆" : "💥"}
+            </div>
+
+            <h3
+              className="font-display font-extrabold text-[26px] mb-3"
+              style={{
+                color: victoryModalData.type === "win" ? "var(--signal)" : "var(--flare)"
+              }}
+            >
+              {victoryModalData.title}
+            </h3>
+
+            <p className="text-[15px] text-[var(--foam)] mb-6 leading-relaxed">
+              {victoryModalData.message}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowVictoryModal(false);
+                router.push("/play");
+              }}
+              className="w-full px-6 py-3.5 rounded-[14px] font-bold text-[15px] transition-all hover:-translate-y-px hover:scale-105"
+              style={{
+                background: victoryModalData.type === "win"
+                  ? "linear-gradient(135deg, var(--signal), color-mix(in srgb, var(--signal) 80%, black))"
+                  : "linear-gradient(135deg, var(--flare), color-mix(in srgb, var(--flare) 80%, black))",
+                color: "var(--abyss)",
+                boxShadow: victoryModalData.type === "win"
+                  ? "0 4px 20px rgba(53,214,192,0.3)"
+                  : "0 4px 20px rgba(255,106,77,0.3)",
+              }}
+            >
+              Return to Lobby →
+            </button>
           </div>
         </div>
       )}
