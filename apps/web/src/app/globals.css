@@ -201,25 +201,6 @@
 /* Don't animate transforms/layout */
 button, a, input { transition-property: background-color, border-color, color, box-shadow, transform, opacity; }
 
-/* ── Fire animation keyframes ───────────────────────── */
-@keyframes fire-glow {
-  from { opacity: 0.7; transform: scale(0.95); }
-  to   { opacity: 1;   transform: scale(1.05); }
-}
-@keyframes flame-flicker {
-  from { transform: scaleX(0.85) scaleY(0.9) rotate(-3deg); opacity: 0.85; }
-  to   { transform: scaleX(1.1)  scaleY(1.1) rotate(3deg);  opacity: 1; }
-}
-@keyframes fire-core {
-  from { opacity: 0.8; transform: scale(0.9); }
-  to   { opacity: 1;   transform: scale(1.15); }
-}
-@keyframes ember-rise {
-  0%   { transform: translateY(0)    translateX(0)    scale(1);   opacity: 1; }
-  60%  { opacity: 0.8; }
-  100% { transform: translateY(-220%) translateX(calc((var(--i, 0) - 1) * 8px)) scale(0.3); opacity: 0; }
-}
-
 /* ── Smoke puff animation ───────────────────────────── */
 @keyframes smoke-rise {
   0% {
@@ -314,3 +295,23 @@ button, a, input { transition-property: background-color, border-color, color, b
   color: var(--mist);
   opacity: 0.6;
 }
+
+/* ── Impact pulses on freshly shot cells ───────────── */
+@keyframes cell-hit-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255,70,40,0.95), 0 0 0 0 rgba(255,70,40,0.6); filter: brightness(2.2) saturate(1.6); }
+  35%  { box-shadow: 0 0 22px 6px rgba(255,70,40,0.9), 0 0 0 4px rgba(255,120,80,0.55); filter: brightness(1.5) saturate(1.4); }
+  60%  { box-shadow: 0 0 10px 2px rgba(255,70,40,0.5); filter: brightness(1.8) saturate(1.5); }
+  100% { box-shadow: 0 0 14px rgba(255,106,77,0.45); filter: none; }
+}
+@keyframes cell-boom-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255,190,70,0.95); filter: brightness(2.4); }
+  40%  { box-shadow: 0 0 28px 8px rgba(255,170,50,0.9); filter: brightness(1.6); }
+  100% { box-shadow: 0 0 16px rgba(235,181,74,0.6); filter: none; }
+}
+@keyframes cell-miss-ripple {
+  0%   { box-shadow: 0 0 0 0 rgba(150,235,230,0.8), inset 0 0 8px rgba(190,245,240,0.8); }
+  100% { box-shadow: 0 0 0 14px rgba(150,235,230,0), inset 0 0 0 rgba(190,245,240,0); }
+}
+.cell-impact-hit  { animation: cell-hit-pulse 1.4s ease-out both; z-index: 3; }
+.cell-impact-boom { animation: cell-boom-pulse 1.4s ease-out both; z-index: 3; }
+.cell-impact-miss { animation: cell-miss-ripple 0.9s ease-out both; }

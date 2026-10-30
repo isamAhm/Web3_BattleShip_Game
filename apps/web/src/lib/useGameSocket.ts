@@ -16,6 +16,8 @@ export interface ShotResult {
   multiplier: number;
   scores: Record<string, number>;
   streaks: Record<string, number>;
+  /** Present when the shot sank a ship: every cell of that ship (x = column, y = row). */
+  sunkShip?: { cells: { x: number; y: number }[]; length: number; orientation: "H" | "V" } | null;
 }
 
 export interface MatchEndPayload {
@@ -93,6 +95,7 @@ export function useGameSocket(callbacks: GameSocketCallbacks) {
         col,
         outcome: raw.outcome,
         sunkShipType: raw.sunkShipType ?? null,
+        sunkShip: raw.sunkShip ?? null,
         points: raw.pointsAwarded ?? raw.points ?? 0,
         multiplier: 1,
         scores: { [raw.shooter]: raw.shooterScore ?? 0 },

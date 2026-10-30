@@ -18,8 +18,6 @@ interface GameBoardProps {
   aimCell?: string | null;
   id: string;
   isPlacement?: boolean;
-  /** cells of ships that just sank — triggers fire animation */
-  newlySunkCells?: string[];
 }
 
 function getCellClass(state: string, isEnemy: boolean): string {
@@ -96,8 +94,7 @@ function CellOverlay({ state }: { state: string }) {
             transform: "rotate(45deg)",
           }}
         />
-        {/* Heavier smoke on sunk */}
-        <SmokeParticles dense />
+        {/* Fire and smoke over wrecks are drawn by WreckEffects */}
       </>
     );
   }
@@ -124,65 +121,6 @@ function CellOverlay({ state }: { state: string }) {
     );
   }
   return null;
-}
-
-/* ── Fire overlay (shown when a ship first sinks) ───── */
-function FireOverlay() {
-  return (
-    <>
-      {/* Base fire glow */}
-      <span
-        className="absolute inset-0 rounded-[6px] pointer-events-none z-[5]"
-        style={{
-          background: "radial-gradient(ellipse at 50% 90%, rgba(255,120,30,0.85) 0%, rgba(255,60,0,0.4) 50%, transparent 75%)",
-          animation: "fire-glow 0.4s ease-in-out infinite alternate",
-        }}
-      />
-      {/* Flame tongues */}
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="absolute bottom-0 pointer-events-none z-[6]"
-          style={{
-            left: `${18 + i * 22}%`,
-            width: "22%",
-            height: "90%",
-            background: `linear-gradient(to top, rgba(255,${80 + i * 30},0,0.95), rgba(255,200,50,0.7) 50%, transparent)`,
-            borderRadius: "50% 50% 20% 20%",
-            transformOrigin: "bottom center",
-            animation: `flame-flicker ${0.5 + i * 0.15}s ease-in-out ${i * 0.1}s infinite alternate`,
-            filter: "blur(1px)",
-          }}
-        />
-      ))}
-      {/* Bright core */}
-      <span
-        className="absolute bottom-[5%] left-[25%] right-[25%] h-[30%] pointer-events-none z-[6]"
-        style={{
-          background: "radial-gradient(ellipse, rgba(255,240,100,0.95) 0%, rgba(255,140,0,0.6) 60%, transparent 100%)",
-          borderRadius: "50%",
-          animation: "fire-core 0.3s ease-in-out infinite alternate",
-          filter: "blur(1px)",
-        }}
-      />
-      {/* Embers rising */}
-      {[0, 1, 2, 3].map((i) => (
-        <span
-          key={i}
-          className="absolute pointer-events-none z-[7]"
-          style={{
-            left: `${10 + i * 22}%`,
-            bottom: "10%",
-            width: 3,
-            height: 3,
-            borderRadius: "50%",
-            background: i % 2 === 0 ? "#ff8c00" : "#ffcc00",
-            animation: `ember-rise ${1 + i * 0.25}s ease-out ${i * 0.3}s infinite`,
-          }}
-        />
-      ))}
-    </>
-  );
 }
 
 /* ── Smoke particles ─────────────────────────────────── */
@@ -224,34 +162,33 @@ export function GameBoard({
   aimCell,
   id,
   isPlacement = false,
-  newlySunkCells = [],
 }: GameBoardProps) {
-  // Track which cells are currently showing fire (key → true while burning)
-  const [firingCells, setFiringCells] = useState<Set<string>>(new Set());
-  const prevSunkRef = useRef<string[]>([]);
-
+  // Cells that just received a shot pulse for a moment (red for hits, ripple for misses)
+  const [impactCells, setImpactCells] = useState<Record<string, "hit" | "miss" | "boom">>({});
+  const prevCellsRef = useRef<Record<string, string>>({});
   useEffect(() => {
-    if (!newlySunkCells || newlySunkCells.length === 0) return;
-    // Only trigger for genuinely new sunk cells
-    const fresh = newlySunkCells.filter((c) => !prevSunkRef.current.includes(c));
-    if (fresh.length === 0) return;
-    prevSunkRef.current = [...prevSunkRef.current, ...fresh];
-
-    setFiringCells((prev) => {
-      const next = new Set(prev);
-      fresh.forEach((c) => next.add(c));
-      return next;
-    });
-
-    // Fire burns for 3.5s then clears
+    const prev = prevCellsRef.current;
+    const fresh: Record<string, "hit" | "miss" | "boom"> = {};
+    for (const [key, state] of Object.entries(cells)) {
+      if (prev[key] === state) continue;
+      if (state === "hit" || state === "sunk") fresh[key] = "hit";
+      else if (state === "boom" || state === "mine") fresh[key] = "boom";
+      else if (state === "miss") fresh[key] = "miss";
+    }
+    prevCellsRef.current = { ...cells };
+    const keys = Object.keys(fresh);
+    if (keys.length === 0) return;
+    setImpactCells((p) => ({ ...p, ...fresh }));
+    // Not cleared on re-run: each batch must remove its own keys or the pulse would stick
     setTimeout(() => {
-      setFiringCells((prev) => {
-        const next = new Set(prev);
-        fresh.forEach((c) => next.delete(c));
+      setImpactCells((p) => {
+        const next = { ...p };
+        keys.forEach((k) => delete next[k]);
         return next;
       });
-    }, 3500);
-  }, [newlySunkCells]);
+    }, 1500);
+  }, [cells]);
+
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!onCellClick) return;
@@ -327,18 +264,22 @@ export function GameBoard({
           {Array.from({ length: 10 }, (_, c) => {
             const key = `${r},${c}`;
             const state = key === aimCell ? "aim" : cells[key] || "empty";
-            const isBurning = firingCells.has(key);
+            const impact = impactCells[key];
             return (
               <button
                 key={`cell-${r}-${c}`}
                 data-key={key}
                 aria-label={`${LETTERS[r]}${c + 1}`}
-                className={getCellClass(state, isEnemy && state === "empty")}
+                className={cn(
+                  getCellClass(state, isEnemy && state === "empty"),
+                  impact === "hit" && "cell-impact-hit",
+                  impact === "boom" && "cell-impact-boom",
+                  impact === "miss" && "cell-impact-miss"
+                )}
                 style={{ gridRow: r + 2, gridColumn: c + 2 }}
                 type="button"
               >
                 <CellOverlay state={state} />
-                {isBurning && <FireOverlay />}
               </button>
             );
           })}
@@ -361,8 +302,10 @@ export function GameBoard({
               ? `${ship.col + 2}`
               : `${ship.col + 2} / span ${ship.size}`,
             filter: ship.wreck
-              ? "drop-shadow(0 3px 4px rgba(0,0,0,.5)) saturate(.7) brightness(.85)"
+              ? "drop-shadow(0 3px 4px rgba(0,0,0,.5)) saturate(.35) brightness(.55) sepia(.3)"
               : "drop-shadow(0 3px 4px rgba(0,0,0,.5))",
+            // Stays intact while burning, then chars into a wreck once the flames die down
+            transition: "filter 1.4s ease 2.2s",
           }}
           dangerouslySetInnerHTML={{
             __html: shipSVG(ship.type, ship.size, ship.vertical ?? false),

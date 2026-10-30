@@ -213,6 +213,29 @@ export class MatchSession {
       timestamp: Date.now(),
     });
 
+    // A sinking shot reveals that one ship (all of its cells) so clients can animate it
+    let sunkShip: { cells: Array<{ x: number; y: number }>; length: number; orientation: 'H' | 'V' } | null =
+      null;
+    if (res.shot.outcome === 'sunk') {
+      const board = targetState.board;
+      const ship = board?.ships.find((sh) =>
+        Array.from({ length: sh.length }, (_, i) =>
+          sh.orientation === 'H' ? { x: sh.x + i, y: sh.y } : { x: sh.x, y: sh.y + i },
+        ).some((c) => c.x === coordinate.x && c.y === coordinate.y),
+      );
+      if (ship) {
+        sunkShip = {
+          length: ship.length,
+          orientation: ship.orientation,
+          cells: Array.from({ length: ship.length }, (_, i) =>
+            ship.orientation === 'H'
+              ? { x: ship.x + i, y: ship.y }
+              : { x: ship.x, y: ship.y + i },
+          ),
+        };
+      }
+    }
+
     // Emit shot result
     this.ioEmitCallback(this.roomCode, 'shot:result', {
       matchId: this.matchId,
@@ -220,6 +243,7 @@ export class MatchSession {
       target: targetState.address,
       coordinate,
       outcome: res.shot.outcome,
+      sunkShip,
       pointsAwarded: res.points,
       shooterStreak: shooterState.streak,
       shooterScore: shooterState.score,
