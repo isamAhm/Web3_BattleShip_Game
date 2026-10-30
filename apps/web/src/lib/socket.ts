@@ -48,14 +48,16 @@ export function connectSocket(token?: string): Socket {
     token ??
     (typeof window !== "undefined" ? localStorage.getItem("wba_session_token") : null);
 
-  if (_socket && currentToken && (!_socket.auth || (_socket.auth as any).token !== currentToken)) {
-    _socket.disconnect();
-    _socket = null;
-  }
-
+  // The socket instance is never replaced: components keep their listeners on it. When the
+  // identity changes we only swap the auth token and reconnect the same instance.
+  const previousToken = (_socket?.auth as { token?: string } | undefined)?.token;
   const socket = getSocket(currentToken || undefined);
+  const tokenChanged = !!_socket && !!currentToken && previousToken !== currentToken;
   if (currentToken) {
     socket.auth = { token: currentToken };
+  }
+  if (tokenChanged && (socket.connected || socket.active)) {
+    socket.disconnect();
   }
   if (!socket.connected) {
     socket.connect();
@@ -111,6 +113,6 @@ export function waitForSocketConnection(
 }
 
 export function disconnectSocket(): void {
+  // Keep the instance (and its listeners); a later connectSocket() reuses it.
   _socket?.disconnect();
-  _socket = null;
 }

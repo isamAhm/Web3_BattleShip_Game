@@ -40,6 +40,9 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
 });
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+const DEV_RELAYER_KEY = '0x0000000000000000000000000000000000000000000000000000000000000001';
+
 export type Env = z.infer<typeof envSchema>;
 
 export function loadEnv(): Env {
@@ -48,7 +51,16 @@ export function loadEnv(): Env {
     console.error('Environment validation failed:', result.error.format());
     throw new Error('Invalid environment configuration');
   }
-  return result.data;
+  const cfg = result.data;
+  if (cfg.CHAIN_MODE === 'testnet') {
+    const missing: string[] = [];
+    if (cfg.MATCH_REGISTRY_ADDRESS === ZERO_ADDRESS) missing.push('MATCH_REGISTRY_ADDRESS');
+    if (cfg.RELAYER_PRIVATE_KEY === DEV_RELAYER_KEY) missing.push('RELAYER_PRIVATE_KEY');
+    if (missing.length > 0) {
+      throw new Error(`CHAIN_MODE=testnet requires real values for: ${missing.join(', ')}`);
+    }
+  }
+  return cfg;
 }
 
 export const env = loadEnv();

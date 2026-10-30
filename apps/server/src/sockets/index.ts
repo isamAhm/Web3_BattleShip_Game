@@ -40,8 +40,32 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
     pingTimeout: 5000,
   });
 
-  // Track connected sockets by normalized address
-  const userSockets = new Map<string, string>(); // address -> socketId
+  // Track every connected socket per normalized address (multiple tabs / reconnect overlap)
+  const userSockets = new Map<string, Set<string>>(); // address -> socketIds
+  const userRoom = (address: string) => `user:${address.toLowerCase()}`;
+
+  /** Puts every live socket of the given players into the match room and tells them it started. */
+  const announceMatch = (
+    players: string[],
+    matchId: string,
+    roomCode: string,
+  ): void => {
+    const session = matchManager.getSession(matchId);
+    for (const p of players) {
+      const addr = p.toLowerCase();
+      const ids = userSockets.get(addr);
+      if (ids && ids.size > 0 && session) session.participants.set(addr, [...ids][ids.size - 1]);
+      io.in(userRoom(addr)).socketsJoin(roomCode);
+    }
+    for (const p of players) {
+      io.to(userRoom(p)).emit('match:found', {
+        matchId,
+        roomCode,
+        players,
+        expiresAt: Date.now() + DEFAULT_CONFIG.placementSeconds * 1000,
+      });
+    }
+  };
 
   // Bind MatchManager emitter to Socket.IO
   matchManager.setIoEmit((room: string, event: string, data: any) => {
@@ -81,7 +105,9 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
   io.on('connection', (rawSocket: Socket) => {
     const socket = rawSocket as AuthenticatedSocket;
     const userAddress = socket.data.user.address.toLowerCase();
-    userSockets.set(userAddress, socket.id);
+    if (!userSockets.has(userAddress)) userSockets.set(userAddress, new Set());
+    userSockets.get(userAddress)!.add(socket.id);
+    socket.join(userRoom(userAddress));
     console.log(`[Socket] Client connected: ${userAddress} (${socket.id})`);
 
     // Check if player has an active match and handle reconnection
@@ -115,30 +141,19 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
         console.log(`[Socket] matchmaking result for ${userAddress}:`, result);
 
         if (!result.ok) {
-          socket.emit('error', { message: result.error });
+          socket.emit('error', {
+            message: result.error,
+            ...(result.activeMatchId
+              ? { code: 'ACTIVE_MATCH', matchId: result.activeMatchId }
+              : {}),
+          });
           return;
         }
 
         if (result.match) {
           const { matchId, roomCode, players } = result.match;
-          const session = matchManager.getSession(matchId);
           console.log(`[Socket] Match paired: ${matchId} between ${players.join(' & ')}`);
-
-          players.forEach((p) => {
-            const sid = userSockets.get(p.toLowerCase());
-            if (sid) {
-              const s = io.sockets.sockets.get(sid);
-              s?.join(roomCode);
-              if (session) session.participants.set(p.toLowerCase(), sid);
-
-              s?.emit('match:found', {
-                matchId,
-                roomCode,
-                players,
-                expiresAt: Date.now() + DEFAULT_CONFIG.placementSeconds * 1000,
-              });
-            }
-          });
+          announceMatch(players, matchId, roomCode);
         } else {
           socket.emit('queue:status', { inQueue: true });
         }
@@ -158,7 +173,7 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
         const { customCode } = roomCreatePayloadSchema.parse(payload || {});
         const res = matchmakingService.createPrivateRoom(userAddress, customCode);
         if (!res.ok) {
-          if (ack) ack({ ok: false, error: res.error });
+          if (ack) ack({ ok: false, error: res.error, activeMatchId: res.activeMatchId });
           else socket.emit('error', { message: res.error });
           return;
         }
@@ -177,29 +192,13 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
         const { roomCode } = roomJoinPayloadSchema.parse(payload);
         const res = matchmakingService.joinPrivateRoom(userAddress, roomCode);
         if (!res.ok) {
-          if (ack) ack({ ok: false, error: res.error });
+          if (ack) ack({ ok: false, error: res.error, activeMatchId: res.activeMatchId });
           else socket.emit('error', { message: res.error });
           return;
         }
 
         const { matchId, players } = res.match!;
-        const session = matchManager.getSession(matchId);
-
-        players.forEach((p) => {
-          const sid = userSockets.get(p.toLowerCase());
-          if (sid) {
-            const s = io.sockets.sockets.get(sid);
-            s?.join(roomCode);
-            if (session) session.participants.set(p.toLowerCase(), sid);
-
-            s?.emit('match:found', {
-              matchId,
-              roomCode,
-              players,
-              expiresAt: Date.now() + DEFAULT_CONFIG.placementSeconds * 1000,
-            });
-          }
-        });
+        announceMatch(players, matchId, res.match!.roomCode);
 
         if (ack) ack({ ok: true, matchId });
       } catch (err: any) {
@@ -299,11 +298,21 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
           return;
         }
 
+        const forfeitingPlayerIdx = session.getPlayerIndex(userAddress);
+        if (forfeitingPlayerIdx === null) {
+          if (ack) ack({ ok: false, error: 'Player not in match' });
+          return;
+        }
+        if (session.matchState.phase === 'finished') {
+          // Already over (e.g. the opponent forfeited first): nothing left to forfeit
+          if (ack) ack({ ok: true, alreadyFinished: true });
+          return;
+        }
+
         console.log(`[Socket] match:forfeit - Player ${userAddress} forfeiting match ${matchId}`);
 
         // Notify all players in the room immediately about the forfeit
-        const forfeitingPlayerIdx = session.getPlayerIndex(userAddress);
-        if (forfeitingPlayerIdx !== null) {
+        {
           const otherPlayerIdx = forfeitingPlayerIdx === 0 ? 1 : 0;
           const otherPlayer = session.matchState.players[otherPlayerIdx];
 
@@ -389,17 +398,14 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
         const invite = await socialRepo.createInvite(userAddress, recipientAddress, roomCode);
         const sender = await playerRepo.findByAddress(userAddress);
 
-        // Notify recipient if connected
-        const targetSid = userSockets.get(recipientAddress.toLowerCase());
-        if (targetSid) {
-          io.to(targetSid).emit('invite:received', {
-            inviteId: invite.inviteId,
-            from: userAddress,
-            fromUsername: sender?.username || `Player_${userAddress.slice(2, 8)}`,
-            roomCode,
-            createdAt: invite.createdAt.toISOString(),
-          });
-        }
+        // Notify every live socket of the recipient (no-op if they are offline)
+        io.to(userRoom(recipientAddress)).emit('invite:received', {
+          inviteId: invite.inviteId,
+          from: userAddress,
+          fromUsername: sender?.username || `Player_${userAddress.slice(2, 8)}`,
+          roomCode,
+          createdAt: invite.createdAt.toISOString(),
+        });
 
         if (ack) ack({ ok: true, inviteId: invite.inviteId });
       } catch (err: any) {
@@ -409,6 +415,11 @@ export function setupSocketServer(httpServer: HttpServer): SocketIOServer {
 
     // --- Disconnect & Grace Period ---
     socket.on('disconnect', () => {
+      const ids = userSockets.get(userAddress);
+      ids?.delete(socket.id);
+      // Another socket for this address is still connected (new tab / reconnect overlap):
+      // the player is not gone, so keep their queue entry and do not arm a forfeit timer.
+      if (ids && ids.size > 0) return;
       userSockets.delete(userAddress);
       matchmakingService.leaveQueue(userAddress);
 

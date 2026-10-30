@@ -61,6 +61,9 @@ export function useNavigationGuard({
   // Handle browser back/forward navigation
   useEffect(() => {
     let isBlocking = false;
+    // Keep the query string (?match=…): pushing only the pathname would drop it and make the
+    // arena believe it is no longer in a multiplayer match.
+    const guardUrl = window.location.pathname + window.location.search + window.location.hash;
 
     const handlePopState = async (e: PopStateEvent) => {
       if (!blockingRef.current || isBlocking) return;
@@ -83,7 +86,7 @@ export function useNavigationGuard({
       } else {
         console.log("[NavGuard] User cancelled navigation");
         // Re-push state to prevent navigation
-        window.history.pushState(null, "", pathname);
+        window.history.pushState(null, "", guardUrl);
       }
 
       isBlocking = false;
@@ -91,7 +94,7 @@ export function useNavigationGuard({
 
     // Push initial state
     if (blockingRef.current) {
-      window.history.pushState(null, "", pathname);
+      window.history.pushState(null, "", guardUrl);
     }
 
     window.addEventListener("popstate", handlePopState);

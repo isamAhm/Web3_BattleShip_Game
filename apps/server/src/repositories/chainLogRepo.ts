@@ -12,8 +12,22 @@ class InMemoryChainLogStore {
     this.logs.set(txHash, log);
   }
 
-  public findByMatchId(matchId: string): IChainLog | null {
-    return Array.from(this.logs.values()).find((l) => l.matchId === matchId) ?? null;
+  public findByMatchId(matchId: string, status?: IChainLog['status']): IChainLog | null {
+    return (
+      Array.from(this.logs.values()).find(
+        (l) => l.matchId === matchId && (!status || l.status === status),
+      ) ?? null
+    );
+  }
+
+  public updateStatus(
+    txHash: string,
+    patch: { status: IChainLog['status']; blockNumber?: number; error?: string },
+  ): IChainLog | null {
+    const log = this.logs.get(txHash);
+    if (!log) return null;
+    Object.assign(log, patch);
+    return log;
   }
 
   public clear(): void {
@@ -63,15 +77,32 @@ export class ChainLogRepository {
     return memoryStore.get(txHash);
   }
 
-  public async findByMatchId(matchId: string): Promise<IChainLog | null> {
+  public async findByMatchId(
+    matchId: string,
+    status?: IChainLog['status'],
+  ): Promise<IChainLog | null> {
     if (isMongoConnected()) {
       try {
-        return await ChainLogModel.findOne({ matchId });
+        return await ChainLogModel.findOne(status ? { matchId, status } : { matchId });
       } catch {
         // fallback
       }
     }
-    return memoryStore.findByMatchId(matchId);
+    return memoryStore.findByMatchId(matchId, status);
+  }
+
+  public async updateStatus(
+    txHash: string,
+    patch: { status: IChainLog['status']; blockNumber?: number; error?: string },
+  ): Promise<IChainLog | null> {
+    if (isMongoConnected()) {
+      try {
+        return await ChainLogModel.findOneAndUpdate({ txHash }, { $set: patch }, { new: true });
+      } catch {
+        // fallback
+      }
+    }
+    return memoryStore.updateStatus(txHash, patch);
   }
 
   public resetMemoryStore(): void {

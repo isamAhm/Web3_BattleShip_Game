@@ -111,6 +111,9 @@ function generateRandomFleet(): { ships: PlacedShip[]; mines: string[] } {
   return { ships, mines };
 }
 
+/** Pending "player left the arena" forfeits, keyed by matchId (cancelled if the arena remounts). */
+const pendingLeaveForfeits = new Map<string, ReturnType<typeof setTimeout>>();
+
 export function ArenaClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -228,8 +231,8 @@ export function ArenaClient() {
     onShotResult: (result) => {
       const key = `${result.row},${result.col}`;
       const isMe = result.shooter && address ? result.shooter.toLowerCase() === address.toLowerCase() : false;
-      const colLetter = LETTERS[result.col] ?? "A";
-      const targetLabel = `${colLetter}${result.row + 1}`;
+      // Same labelling as the board: row letter + column number
+      const targetLabel = `${LETTERS[result.row] ?? "A"}${result.col + 1}`;
 
       if (isMe) {
         setFoeCells((prev) => ({ ...prev, [key]: result.outcome as any }));
@@ -342,8 +345,43 @@ export function ArenaClient() {
     onChatMessage: (sender, text) => {
       setChatMessages((prev) => [...prev, { sender: sender.slice(0, 8) + "…", text }]);
     },
+    onForfeitNotice: (message) => setStatusMsg(message),
     onError: (msg) => setStatusMsg(`Error: ${msg}`),
   });
+
+  // Leaving the arena by any route (router push, unmounting page) must not leave the opponent
+  // waiting on a match nobody is playing. The delay keeps React StrictMode / fast-refresh
+  // remounts from forfeiting; a remount for the same match cancels the pending forfeit.
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const spectatorRef = useRef(isSpectator);
+  spectatorRef.current = isSpectator;
+  const forfeitMatchRef = useRef(forfeitMatch);
+  forfeitMatchRef.current = forfeitMatch;
+  // Remember the match for the lifetime of this component: the URL param can briefly vanish
+  // (history changes), which must not be mistaken for the player leaving.
+  const joinedMatchRef = useRef<string | null>(matchIdParam);
+  if (matchIdParam) joinedMatchRef.current = matchIdParam;
+  useEffect(() => {
+    const matchId = joinedMatchRef.current;
+    if (matchId) {
+      const pending = pendingLeaveForfeits.get(matchId);
+      if (pending) {
+        clearTimeout(pending);
+        pendingLeaveForfeits.delete(matchId);
+      }
+    }
+    return () => {
+      const id = joinedMatchRef.current;
+      if (!id || phaseRef.current === "ended" || spectatorRef.current) return;
+      const timer = setTimeout(() => {
+        pendingLeaveForfeits.delete(id);
+        forfeitMatchRef.current(id);
+        clearActiveMatch();
+      }, 1500);
+      pendingLeaveForfeits.set(id, timer);
+    };
+  }, []);
 
   // Calculate live player fleet for PlayerPanel
   const playerFleet: FleetShip[] = useMemo(() => {
@@ -679,15 +717,16 @@ export function ArenaClient() {
     }
 
     if (matchIdParam) {
+      // Engine coordinates: x = column, y = row (H ships extend along x, V along y)
       const engineShips = playerShips.map((s) => ({
-        x: s.row,
-        y: s.col,
+        x: s.col,
+        y: s.row,
         length: s.size,
         orientation: s.vertical ? ("V" as const) : ("H" as const),
       }));
       const engineMines = playerMines.map((m) => {
         const [r, c] = m.split(",").map(Number);
-        return { x: r, y: c };
+        return { x: c, y: r };
       });
       const salt = generateSalt();
       const commitment = commitPlacement({ ships: engineShips, mines: engineMines }, salt);
@@ -1024,7 +1063,11 @@ export function ArenaClient() {
   const handleForfeit = async () => {
     setShowForfeitConfirm(false);
     if (matchIdParam && forfeitMatch) {
-      await forfeitMatch(matchIdParam);
+      const ack = await forfeitMatch(matchIdParam);
+      if (!ack.ok && ack.error === "timeout") {
+        setStatusMsg("Could not reach the server to forfeit. Check your connection and try again.");
+        return;
+      }
       setPhase("ended");
       clearActiveMatch(); // Clear active match from storage
       setBannerAlert({ type: "lose", text: "🏳️ MATCH CONCEDED · SURRENDER RECORDED" });
@@ -1128,6 +1171,12 @@ export function ArenaClient() {
                       <button
                         type="button"
                         onClick={() => {
+                          if (matchIdParam) {
+                            // A multiplayer match is over: start a new one from the lobby
+                            clearActiveMatch();
+                            router.push("/play");
+                            return;
+                          }
                           handleRandomizePlacement();
                           setPhase("placement");
                         }}

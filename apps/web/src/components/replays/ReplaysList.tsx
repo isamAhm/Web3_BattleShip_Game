@@ -48,7 +48,12 @@ export function ReplaysList() {
         setMatches((prev) =>
           prev.map((m) =>
             m.matchId === matchId
-              ? { ...m, resultHash: result.stored, chainStatus: "recorded", txHash: result.chainTx || m.txHash }
+              ? {
+                  ...m,
+                  resultHash: result.stored,
+                  chainStatus: result.match?.chainStatus ?? m.chainStatus,
+                  txHash: result.chainTx || m.txHash,
+                }
               : m
           )
         );

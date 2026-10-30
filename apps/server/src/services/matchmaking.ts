@@ -20,12 +20,22 @@ export class MatchmakingService {
   private queue: string[] = []; // queued player addresses
   private privateRooms = new Map<string, PrivateRoom>(); // roomCode -> room
 
-  public joinQueue(address: string): { ok: boolean; error?: string; match?: MatchFoundResult } {
+  public joinQueue(address: string): {
+    ok: boolean;
+    error?: string;
+    activeMatchId?: string;
+    match?: MatchFoundResult;
+  } {
     const norm = address.toLowerCase();
 
     // Check if already in active match
-    if (matchManager.getActiveMatchForPlayer(norm)) {
-      return { ok: false, error: 'Player is already in an active match' };
+    const active = matchManager.getActiveMatchForPlayer(norm);
+    if (active) {
+      return {
+        ok: false,
+        error: 'Player is already in an active match',
+        activeMatchId: active.matchId,
+      };
     }
 
     // Check if already in queue
@@ -65,10 +75,15 @@ export class MatchmakingService {
   public createPrivateRoom(
     hostAddress: string,
     customCode?: string,
-  ): { ok: boolean; roomCode?: string; error?: string } {
+  ): { ok: boolean; roomCode?: string; error?: string; activeMatchId?: string } {
     const norm = hostAddress.toLowerCase();
-    if (matchManager.getActiveMatchForPlayer(norm)) {
-      return { ok: false, error: 'Player is already in an active match' };
+    const active = matchManager.getActiveMatchForPlayer(norm);
+    if (active) {
+      return {
+        ok: false,
+        error: 'Player is already in an active match',
+        activeMatchId: active.matchId,
+      };
     }
 
     const code = customCode
@@ -91,7 +106,7 @@ export class MatchmakingService {
   public joinPrivateRoom(
     guestAddress: string,
     roomCode: string,
-  ): { ok: boolean; error?: string; match?: MatchFoundResult } {
+  ): { ok: boolean; error?: string; activeMatchId?: string; match?: MatchFoundResult } {
     const norm = guestAddress.toLowerCase();
     const code = roomCode.toUpperCase();
     const room = this.privateRooms.get(code);
@@ -108,8 +123,13 @@ export class MatchmakingService {
       return { ok: false, error: 'Room is already full' };
     }
 
-    if (matchManager.getActiveMatchForPlayer(norm)) {
-      return { ok: false, error: 'Player is already in an active match' };
+    const active = matchManager.getActiveMatchForPlayer(norm);
+    if (active) {
+      return {
+        ok: false,
+        error: 'Player is already in an active match',
+        activeMatchId: active.matchId,
+      };
     }
 
     room.guest = norm;

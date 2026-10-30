@@ -12,7 +12,8 @@ import { CreateRoomPage } from "./CreateRoomPage";
 import { JoinRoomPage } from "./JoinRoomPage";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { useAuthCtx } from "@/lib/AuthContext";
-import { getActiveMatch } from "@/lib/useNavigationGuard";
+import { getActiveMatch, clearActiveMatch } from "@/lib/useNavigationGuard";
+import { api } from "@/lib/api";
 
 export type LobbyView = "play" | "create" | "join";
 
@@ -26,25 +27,31 @@ export function LobbyClient() {
   const [queueMsg, setQueueMsg] = useState("");
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
 
-  // Check for active match on mount and when returning to lobby
+  // Track the locally stored active match, dropping it if the server says it is already over
   useEffect(() => {
-    const matchId = getActiveMatch();
-    console.log("[Lobby] Checking for active match:", matchId);
-    setActiveMatchId(matchId);
-
-    // Also check periodically in case of storage changes
-    const interval = setInterval(() => {
-      const currentMatch = getActiveMatch();
-      if (currentMatch !== activeMatchId) {
-        console.log("[Lobby] Active match changed:", currentMatch);
-        setActiveMatchId(currentMatch);
-      }
-    }, 1000);
-
+    const sync = () => setActiveMatchId((prev) => {
+      const stored = getActiveMatch();
+      return stored === prev ? prev : stored;
+    });
+    sync();
+    const interval = setInterval(sync, 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!activeMatchId) return;
+    let cancelled = false;
+    api.matchStatus(activeMatchId).then((status) => {
+      if (cancelled || status === "active") return;
+      clearActiveMatch();
+      setActiveMatchId(null);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [activeMatchId]);
 
-  const { joinQueue, leaveQueue } = useGameSocket({
+  const { joinQueue, leaveQueue, forfeitMatch } = useGameSocket({
     onMatchFound: (matchId, opponent) => {
       setInQueue(false);
       setQueueMsg(`⚔️ Opponent found (${opponent.slice(0, 8)}…)! Launching Arena…`);
@@ -52,11 +59,24 @@ export function LobbyClient() {
         router.push(`/arena?match=${matchId}`);
       }, 500);
     },
+    onActiveMatch: (matchId) => {
+      // The server still has an unfinished match for us: offer to continue or forfeit it
+      setActiveMatchId(matchId);
+      localStorage.setItem("wba_active_match", matchId);
+    },
     onError: (msg) => {
       setQueueMsg(`Error: ${msg}`);
       setInQueue(false);
     },
   });
+
+  const handleForfeitActive = async () => {
+    if (!activeMatchId) return;
+    await forfeitMatch(activeMatchId);
+    clearActiveMatch();
+    setActiveMatchId(null);
+    setQueueMsg("Previous match forfeited. You can start a new game now.");
+  };
 
   const handleContinueMatch = () => {
     if (activeMatchId) {
@@ -120,6 +140,14 @@ export function LobbyClient() {
               }}
             >
               Continue Match →
+            </button>
+            <button
+              type="button"
+              onClick={handleForfeitActive}
+              className="px-4 py-2 rounded-[10px] text-[13px] font-bold border transition-all hover:-translate-y-px"
+              style={{ borderColor: "rgba(255,106,77,0.5)", color: "var(--flare)" }}
+            >
+              Forfeit
             </button>
           </div>
         )}

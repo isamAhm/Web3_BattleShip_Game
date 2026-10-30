@@ -203,12 +203,6 @@ export class PostMatchProcessor {
 
       await tournamentRepo.updateStandings(tourn.tournamentId, updatedList);
     }
-
-    // 8. Clean up match session from memory
-    // Import matchManager at the top of the function to avoid circular dependency
-    const { matchManager } = await import('../services/matchManager.js');
-    matchManager.removeSession(matchId);
-    console.log(`[PostMatchProcessor] Cleaned up session for match ${matchId}`);
   }
 
   public async close(): Promise<void> {

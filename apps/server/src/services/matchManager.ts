@@ -21,8 +21,25 @@ import {
 import { matchRepo } from '../repositories/matchRepo.js';
 import { postMatchProcessor } from '../workers/postMatchWorker.js';
 
+/** How long a finished session stays in memory so players can still submit reveals. */
+const REVEAL_WINDOW_MS = 5 * 60 * 1000;
+
+export interface ShotRecord {
+  shooter: string;
+  target: string;
+  coordinate: { x: number; y: number };
+  outcome: string;
+  pointsAwarded: number;
+  shooterStreak: number;
+  shooterScore: number;
+  timestamp: number;
+}
+
 export class MatchSession {
   public matchState: MatchState;
+  public shotLog: ShotRecord[] = [];
+  public cleanupTimer: NodeJS.Timeout | null = null;
+  public onExpireCallback?: (matchId: string) => void;
   public roomCode: string;
   public participants: Map<string, string> = new Map(); // address -> socketId
   public spectators: Set<string> = new Set(); // socketIds
@@ -185,6 +202,17 @@ export class MatchSession {
         ? this.matchState.players[this.matchState.winner].address
         : null;
 
+    this.shotLog.push({
+      shooter: shooterState.address,
+      target: targetState.address,
+      coordinate: { x: coordinate.x, y: coordinate.y },
+      outcome: res.shot.outcome,
+      pointsAwarded: res.points,
+      shooterStreak: shooterState.streak,
+      shooterScore: shooterState.score,
+      timestamp: Date.now(),
+    });
+
     // Emit shot result
     this.ioEmitCallback(this.roomCode, 'shot:result', {
       matchId: this.matchId,
@@ -216,6 +244,7 @@ export class MatchSession {
 
     const res = forfeit(this.matchState, idx, reason);
     if (!res.ok) return;
+    console.log(`[MatchSession] ${address} forfeits ${this.matchId} (reason: ${reason})`);
 
     this.matchState = res.state;
     this.handleEndedState();
@@ -238,9 +267,15 @@ export class MatchSession {
 
     this.matchState = res.state;
 
+    this.persistReveals().catch((err) =>
+      console.error(`[MatchSession] Failed to persist reveals for ${this.matchId}:`, err),
+    );
+
     // If both revealed, verify match and finalize record
     if (this.matchState.players[0].reveal && this.matchState.players[1].reveal) {
-      this.verifyAndPersistFinal();
+      this.verifyAndPersistFinal().catch((err) =>
+        console.error(`[MatchSession] Verification failed for ${this.matchId}:`, err),
+      );
     }
 
     return { ok: true };
@@ -283,16 +318,26 @@ export class MatchSession {
         : 'Match completed.',
     });
 
-    // Save preliminary ended state to DB
-    await matchRepo.update(this.matchId, {
+    // Save ended state, the shot log and the canonical record (when there is a winner) to DB
+    const finalUpdate: Parameters<typeof matchRepo.update>[1] = {
       status: 'ended',
       winner: winnerAddress,
       forfeit: this.matchState.forfeit !== null,
       scores: new Map(Object.entries(scoresObj)),
+      shots: this.shotLog,
       endedAt: new Date(),
-    });
+    };
+    if (winnerAddress !== null) {
+      const record = buildRecord(this.matchState);
+      finalUpdate.canonicalRecord = record;
+      finalUpdate.resultHash = resultHash(record);
+    }
+    await matchRepo.update(this.matchId, finalUpdate);
+
+    this.scheduleExpiry();
 
     if (this.onMatchEndCallback) {
+      console.log(`[MatchSession] Invoking onMatchEndCallback for match ${this.matchId}`);
       this.onMatchEndCallback(this.matchId);
     }
 
@@ -305,17 +350,8 @@ export class MatchSession {
     let recordHash: string | undefined;
 
     if (verification.status === 'verified') {
-      const record = buildRecord(this.matchState);
-      recordHash = resultHash(record);
-
-      await matchRepo.update(this.matchId, {
-        verification: { status: 'verified' },
-        canonicalRecord: record,
-        resultHash: recordHash,
-      });
-
-      // Trigger post-match processing for chain recording
-      await postMatchProcessor.scheduleProcessing(this.matchId);
+      recordHash = verification.resultHash;
+      await matchRepo.update(this.matchId, { verification: { status: 'verified' } });
     } else {
       await matchRepo.update(this.matchId, {
         verification: {
@@ -330,6 +366,27 @@ export class MatchSession {
       verification,
       resultHash: recordHash,
     });
+  }
+
+  private async persistReveals(): Promise<void> {
+    const reveals = new Map<string, { salt: string; ships: any[]; mines: any[] }>();
+    for (const p of this.matchState.players) {
+      if (p.reveal) {
+        reveals.set(p.address, {
+          salt: p.reveal.salt,
+          ships: p.reveal.board.ships,
+          mines: p.reveal.board.mines,
+        });
+      }
+    }
+    await matchRepo.update(this.matchId, { reveals });
+  }
+
+  /** Keeps the finished session around for the reveal window, then asks the manager to drop it. */
+  private scheduleExpiry(): void {
+    if (this.cleanupTimer) clearTimeout(this.cleanupTimer);
+    this.cleanupTimer = setTimeout(() => this.onExpireCallback?.(this.matchId), REVEAL_WINDOW_MS);
+    this.cleanupTimer.unref?.();
   }
 
   public endMatch(winnerAddress: string | null, isForfeit: boolean): void {
@@ -351,6 +408,12 @@ export class MatchSession {
     if (this.turnTimer) clearTimeout(this.turnTimer);
     this.disconnectTimers.forEach((timer) => clearTimeout(timer));
     this.disconnectTimers.clear();
+  }
+
+  public dispose(): void {
+    this.clearTimers();
+    if (this.cleanupTimer) clearTimeout(this.cleanupTimer);
+    this.cleanupTimer = null;
   }
 
   public getView(viewer: Viewer): PublicMatchView {
@@ -389,6 +452,7 @@ export class MatchManager {
       startedAt: new Date(),
     });
 
+    session.onExpireCallback = (id) => this.removeSession(id);
     session.onMatchEndCallback = () => {
       this.playerToMatch.delete(player1.toLowerCase());
       this.playerToMatch.delete(player2.toLowerCase());
@@ -413,7 +477,9 @@ export class MatchManager {
     if (!matchId) return null;
     const session = this.getSession(matchId);
     if (!session || session.matchState.phase === 'finished') {
+      // Clean up mapping if match is finished
       this.playerToMatch.delete(norm);
+      console.log(`[MatchManager] Cleaned up finished match mapping for player ${norm}`);
       return null;
     }
     return session;
@@ -422,7 +488,7 @@ export class MatchManager {
   public removeSession(matchId: string): void {
     const session = this.sessions.get(matchId);
     if (session) {
-      session.clearTimers();
+      session.dispose();
       this.playerToMatch.delete(session.matchState.players[0].address.toLowerCase());
       this.playerToMatch.delete(session.matchState.players[1].address.toLowerCase());
       this.roomToMatch.delete(session.roomCode);
@@ -431,7 +497,7 @@ export class MatchManager {
   }
 
   public clear(): void {
-    this.sessions.forEach((s) => s.clearTimers());
+    this.sessions.forEach((s) => s.dispose());
     this.sessions.clear();
     this.roomToMatch.clear();
     this.playerToMatch.clear();

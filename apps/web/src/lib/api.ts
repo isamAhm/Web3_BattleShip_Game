@@ -66,25 +66,38 @@ export const api = {
       resultHash: string;
       chainStatus: string;
       chainTxHash: string | null;
+      chainMode?: string;
       canonicalRecord?: any;
       verification?: any;
     }>(`/api/matches/${matchId}/verification`);
 
-    const isVerified =
-      data.chainStatus === "recorded" ||
-      data.chainStatus === "verified" ||
-      data.chainStatus === "submitted" ||
-      data.verification?.status === "verified" ||
-      Boolean(data.resultHash);
+    // "verified" only means both reveals matched their commitments and the replay agreed.
+    const isVerified = data.verification?.status === "verified";
+    const chainLabel =
+      data.chainStatus === "recorded"
+        ? data.chainMode === "simulated"
+          ? "recorded (simulated, not on-chain)"
+          : "recorded on-chain"
+        : (data.chainStatus ?? "pending");
 
     return {
       verified: isVerified,
       computed: data.resultHash ?? "",
       stored: data.resultHash ?? "",
-      chainTx: data.chainTxHash ?? (isVerified ? "0x7d2f928e44a569c73ef890a82410bc39871587421946059e847c2105a300d81b" : null),
-      chainStatus: isVerified ? "recorded on-chain" : (data.chainStatus ?? "unverified"),
+      chainTx: data.chainTxHash ?? null,
+      chainStatus: chainLabel,
       match: data,
     };
+  },
+
+  /** "finished" if the match is over or unknown to the server, "active" otherwise. */
+  matchStatus: async (matchId: string): Promise<"active" | "finished"> => {
+    try {
+      const m = await apiFetch<{ phase?: string; status?: string }>(`/api/matches/${matchId}`);
+      return m.phase === "finished" || m.status === "ended" ? "finished" : "active";
+    } catch (err: any) {
+      return /not found/i.test(err?.message ?? "") ? "finished" : "active";
+    }
   },
 
   // Active rooms & matches

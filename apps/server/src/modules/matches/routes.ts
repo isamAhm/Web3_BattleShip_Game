@@ -1,10 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import crypto from 'node:crypto';
 import { matchRepo } from '../../repositories/matchRepo.js';
 import { matchManager } from '../../services/matchManager.js';
 import { matchmakingService } from '../../services/matchmaking.js';
 import { revealPayloadSchema } from '@wba/shared';
-import { replayScores } from '@wba/engine';
+import { replayScores, verifyReveal, verifyRecord } from '@wba/engine';
 import { requireAuth } from '../../middleware/auth.js';
 
 export const matchesRouter = Router();
@@ -152,19 +151,18 @@ matchesRouter.get('/:id/replay', async (req: Request, res: Response, next: NextF
     const board0 = { ships: r1.ships, mines: r1.mines };
     const board1 = { ships: r2.ships, mines: r2.mines };
 
-    const shots = match.shots.map((s) => ({
-      player: (s.shooter.toLowerCase() === player0 ? 0 : 1) as 0 | 1,
-      x: s.coordinate.x,
-      y: s.coordinate.y,
-      outcome: s.outcome as any,
-    }));
-
-    const forfeitRecord = match.forfeit
-      ? {
-          by: match.winner?.toLowerCase() === player0 ? player1 : player0,
-          reason: 'resigned' as const,
-        }
-      : null;
+    const record = match.canonicalRecord as
+      | { shots: any[]; forfeit: { by: any; reason: any } | null }
+      | undefined;
+    if (!record) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'REPLAY_UNAVAILABLE', message: 'Match has no canonical record yet' },
+      });
+      return;
+    }
+    const shots = record.shots;
+    const forfeitRecord = record.forfeit;
 
     const replayResult = replayScores({
       matchId,
@@ -200,29 +198,6 @@ matchesRouter.get('/:id/verification', async (req: Request, res: Response, next:
         error: { code: 'MATCH_NOT_FOUND', message: 'Match not found' },
       });
       return;
-    }
-
-    // Auto-finalize and verify completed match proofs if hash was not yet finalized
-    if (match.status === 'ended') {
-      const hash = match.resultHash || ('0x' + crypto.createHash('sha256')
-        .update(`${matchId}:${match.players.join(',')}:${match.winner || 'draw'}:${match.shots.length}`)
-        .digest('hex'));
-      const txHash = match.chainTxHash || ('0x' + crypto.randomBytes(32).toString('hex'));
-      const verification: { status: 'verified' } = { status: 'verified' };
-
-      if (!match.resultHash || match.chainStatus === 'pending') {
-        await matchRepo.update(matchId, {
-          resultHash: hash,
-          verification,
-          chainStatus: 'recorded',
-          chainTxHash: txHash,
-        });
-      }
-
-      match.resultHash = hash;
-      match.verification = verification as any;
-      match.chainStatus = 'recorded';
-      match.chainTxHash = txHash;
     }
 
     res.json({
@@ -261,7 +236,7 @@ matchesRouter.post(
           return;
         }
       } else {
-        // Offline / finished match reveal update
+        // Session already expired: verify the reveal against the stored commitment
         const match = await matchRepo.findById(matchId);
         if (!match) {
           res.status(404).json({
@@ -271,12 +246,70 @@ matchesRouter.post(
           return;
         }
 
-        const reveals =
+        const me = req.user!.address.toLowerCase();
+        if (!match.players.map((p) => p.toLowerCase()).includes(me)) {
+          res.status(403).json({
+            success: false,
+            error: { code: 'FORBIDDEN', message: 'Only match players can submit a reveal' },
+          });
+          return;
+        }
+        if (match.status !== 'ended') {
+          res.status(409).json({
+            success: false,
+            error: { code: 'WRONG_PHASE', message: 'Reveals are accepted after the match' },
+          });
+          return;
+        }
+
+        const commitments =
+          match.commitments instanceof Map
+            ? match.commitments
+            : new Map(Object.entries(match.commitments || {}));
+        const commitment = commitments.get(me) as string | undefined;
+        if (!commitment) {
+          res.status(400).json({
+            success: false,
+            error: { code: 'NO_COMMITMENT', message: 'This player never committed a fleet' },
+          });
+          return;
+        }
+        const checked = verifyReveal(commitment, { board: { ships, mines }, salt });
+        if (!checked.ok) {
+          res.status(400).json({
+            success: false,
+            error: { code: 'INVALID_REVEAL', message: checked.reason },
+          });
+          return;
+        }
+
+        const reveals = new Map<string, any>(
           match.reveals instanceof Map
             ? match.reveals
-            : new Map(Object.entries(match.reveals || {}));
-        reveals.set(req.user!.address.toLowerCase(), { salt, ships, mines });
-        await matchRepo.update(matchId, { reveals: reveals as any });
+            : Object.entries(match.reveals || {}),
+        );
+        reveals.set(me, {
+          salt: checked.reveal.salt,
+          ships: checked.reveal.board.ships,
+          mines: checked.reveal.board.mines,
+        });
+
+        const update: Record<string, unknown> = { reveals };
+        if (match.canonicalRecord) {
+          const toReveal = (addr: string) => {
+            const r = reveals.get(addr.toLowerCase());
+            return r ? { board: { ships: r.ships, mines: r.mines }, salt: r.salt } : null;
+          };
+          const v = verifyRecord(match.canonicalRecord, [
+            toReveal(match.players[0]),
+            toReveal(match.players[1]),
+          ]);
+          update.verification =
+            v.status === 'verified'
+              ? { status: 'verified' }
+              : { status: v.status, details: { errors: v.errors, missing: v.missingReveals } };
+        }
+        await matchRepo.update(matchId, update as any);
       }
 
       res.json({ success: true, data: { message: 'Reveal submitted successfully' } });
